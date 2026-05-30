@@ -1,8 +1,9 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse, after } from "next/server";
 import { getNodeNet, saveReport } from "@/lib/db";
 import { nodeTokenValid, tokenFromHeader } from "@/lib/auth";
 import { clientIp } from "@/lib/net";
 import { resolveCountry, shouldResolve } from "@/lib/geo";
+import { maybeEvaluate } from "@/lib/monitoring";
 import type { Report } from "@/lib/types";
 
 // HTTP ingestion endpoint used by nodes running with `transport: http`
@@ -37,6 +38,16 @@ export async function POST(req: NextRequest) {
       country = await resolveCountry(ip);
     }
     const node = await saveReport(body, { ip, country });
+    // Drive alert/offline evaluation off node traffic (throttled), so alerts
+    // work even where there's no frequent cron (Vercel Hobby). Runs after the
+    // response via waitUntil, so it never delays the node.
+    after(async () => {
+      try {
+        await maybeEvaluate();
+      } catch (err) {
+        console.error("maybeEvaluate failed:", err);
+      }
+    });
     return NextResponse.json({ ok: true, id: node.id });
   } catch (err) {
     console.error("saveReport failed:", err);

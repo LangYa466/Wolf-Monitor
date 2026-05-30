@@ -242,6 +242,35 @@ export interface EvalSummary {
   online: number;
 }
 
+// Minimum spacing between report-triggered evaluations. Node ingestion is
+// frequent (seconds); this throttles the actual alert evaluation to ~once a
+// minute regardless of how many reports arrive.
+const EVAL_MIN_INTERVAL_MS = 45_000;
+
+// maybeEvaluate runs evaluate() at most once per EVAL_MIN_INTERVAL_MS, claiming
+// the slot atomically so concurrent reports (serverless) don't double-run. This
+// lets alerts work on platforms without a frequent cron (e.g. Vercel Hobby):
+// as long as any node keeps reporting, evaluation keeps ticking. Returns true
+// if this call performed the evaluation.
+export async function maybeEvaluate(): Promise<boolean> {
+  await ensureSchema();
+  const now = Date.now();
+  const cutoff = now - EVAL_MIN_INTERVAL_MS;
+  // Atomic claim: insert/update the lastEvalAt marker only if it's stale. The
+  // ON CONFLICT ... WHERE makes exactly one concurrent caller win the slot.
+  const { rows } = await getPool().query(
+    `INSERT INTO app_settings (key, value)
+       VALUES ('lastEvalAt', to_jsonb($1::bigint))
+     ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
+       WHERE (app_settings.value #>> '{}')::bigint < $2
+     RETURNING key`,
+    [now, cutoff]
+  );
+  if (rows.length === 0) return false; // someone evaluated recently
+  await evaluate();
+  return true;
+}
+
 // evaluate checks every alert rule and offline setting against current data and
 // dispatches notifications on state transitions. Idempotent per tick.
 export async function evaluate(): Promise<EvalSummary> {
