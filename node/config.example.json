@@ -1,0 +1,7 @@
+{
+  "master": "wss://your-master.example.com",
+  "token": "change-me-shared-secret",
+  "transport": "ws",
+  "interval": 3,
+  "insecure": false
+}

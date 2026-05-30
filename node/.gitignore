@@ -1,0 +1,8 @@
+# build output
+/wolf-node
+/wolf-node.exe
+/wolf-node-arm64
+*.exe
+
+# local runtime config (copy from config.example.json)
+/config.json

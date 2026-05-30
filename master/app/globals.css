@@ -1,0 +1,59 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* Dark monitoring theme with a green primary. */
+    --background: 222 18% 7%;
+    --foreground: 210 20% 92%;
+
+    --card: 220 16% 11%;
+    --card-foreground: 210 20% 92%;
+
+    --popover: 220 16% 11%;
+    --popover-foreground: 210 20% 92%;
+
+    --primary: 142 69% 45%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 218 16% 18%;
+    --secondary-foreground: 210 20% 92%;
+
+    --muted: 218 16% 16%;
+    --muted-foreground: 215 14% 60%;
+
+    --accent: 218 16% 19%;
+    --accent-foreground: 210 20% 96%;
+
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+
+    --success: 142 69% 45%;
+    --success-foreground: 0 0% 100%;
+
+    --warning: 38 92% 50%;
+    --warning-foreground: 0 0% 100%;
+
+    --border: 218 16% 21%;
+    --input: 218 16% 21%;
+    --ring: 142 69% 45%;
+
+    --radius: 0.6rem;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-feature-settings: "rlig" 1, "calt" 1;
+  }
+}
+
+/* tabular numbers for metrics */
+.tnum {
+  font-variant-numeric: tabular-nums;
+}

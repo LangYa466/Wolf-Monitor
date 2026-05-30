@@ -1,0 +1,21 @@
+# dependencies / build output
+node_modules/
+.next/
+out/
+*.tsbuildinfo
+next-env.d.ts
+.vercel
+
+# env / secrets
+.env
+.env*.local
+
+# Go binaries
+*.exe
+/node/wolf-node
+/node/wolf-node-arm64
+/node/config.json
+
+# OS
+.DS_Store
+Thumbs.db
