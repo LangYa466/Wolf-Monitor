@@ -8,8 +8,9 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest) {
-  const token = tokenFromHeader(req.headers.get("authorization")) ??
-    req.nextUrl.searchParams.get("token");
+  // Token only from the Authorization header — never the query string (URLs end
+  // up in access/proxy logs).
+  const token = tokenFromHeader(req.headers.get("authorization"));
   if (!(await nodeTokenValid(token)))
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 

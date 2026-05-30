@@ -19,6 +19,10 @@ export default function LatencyView() {
     async function poll() {
       try {
         const res = await fetch("/api/ping-results", { cache: "no-store" });
+        if (res.status === 401) {
+          location.href = "/login";
+          return;
+        }
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
         if (alive) {

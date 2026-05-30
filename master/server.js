@@ -92,6 +92,12 @@ app.prepare().then(() => {
   // fire without an external scheduler. On Vercel this is done by Cron instead.
   const EVAL_INTERVAL_MS = parseInt(process.env.EVAL_INTERVAL_MS || "30000", 10);
   const cronSecret = process.env.CRON_SECRET || "";
+  if (!cronSecret) {
+    console.warn(
+      "[wolf] WARNING: CRON_SECRET not set — /api/cron/check is unauthenticated. " +
+        "Set CRON_SECRET to require Authorization: Bearer <secret>."
+    );
+  }
   async function tick() {
     try {
       await fetch(`http://127.0.0.1:${port}/api/cron/check`, {

@@ -64,12 +64,13 @@ export function renderTemplate(
   template: string,
   vars: { emoji: string; event: string; client: string; message: string; time: string }
 ): string {
-  return template
-    .replace(/\{\{\s*emoji\s*\}\}/g, vars.emoji)
-    .replace(/\{\{\s*event\s*\}\}/g, vars.event)
-    .replace(/\{\{\s*client\s*\}\}/g, vars.client)
-    .replace(/\{\{\s*message\s*\}\}/g, vars.message)
-    .replace(/\{\{\s*time\s*\}\}/g, vars.time);
+  // Single pass with a replacer function: values are NOT re-scanned (so a node
+  // literally named "{{time}}" stays literal) and `$`-sequences in values are
+  // not treated as replacement patterns.
+  const allowed = new Set(["emoji", "event", "client", "message", "time"]);
+  return template.replace(/\{\{\s*(\w+)\s*\}\}/g, (match, key: string) =>
+    allowed.has(key) ? (vars as Record<string, string>)[key] : match
+  );
 }
 
 function nowString(): string {

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -92,9 +93,12 @@ func (r *Runner) runDue() {
 }
 
 func (r *Runner) refresh(ctx context.Context) {
-	url := r.base + "/api/tasks?host=" + r.hostname + "&token=" + r.token
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	// Token travels only in the Authorization header, never the URL (query
+	// strings leak into access/proxy logs).
+	endpoint := r.base + "/api/tasks?host=" + url.QueryEscape(r.hostname)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
+		log.Printf("[ping] refresh: build request: %v", err)
 		return
 	}
 	if r.token != "" {
@@ -102,16 +106,19 @@ func (r *Runner) refresh(ctx context.Context) {
 	}
 	resp, err := r.client.Do(req)
 	if err != nil {
+		log.Printf("[ping] refresh: %v", err)
 		return
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
+		log.Printf("[ping] refresh: master returned %d", resp.StatusCode)
 		return
 	}
 	var payload struct {
 		Tasks []Task `json:"tasks"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		log.Printf("[ping] refresh: decode: %v", err)
 		return
 	}
 

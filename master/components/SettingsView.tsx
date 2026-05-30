@@ -119,17 +119,24 @@ function ServersSection({ nodes }: { nodes: NodeView[] }) {
       setMsg("Token rotated — update your nodes.");
     }
   }
-  function onDrop(targetId: string) {
+  async function onDrop(targetId: string) {
     if (!dragId || dragId === targetId) return;
+    const prev = order;
     const ids = order.map((n) => n.id);
     const from = ids.indexOf(dragId);
     const to = ids.indexOf(targetId);
     const next = [...order];
     const [moved] = next.splice(from, 1);
     next.splice(to, 0, moved);
-    setOrder(next);
+    setOrder(next); // optimistic
     setDragId(null);
-    api("/api/nodes/order", "POST", { order: next.map((n) => n.id) });
+    const res = await api("/api/nodes/order", "POST", { order: next.map((n) => n.id) });
+    if (res.ok) {
+      setMsg("Order saved.");
+    } else {
+      setOrder(prev); // roll back on failure
+      setMsg("Failed to save order.");
+    }
   }
 
   const origin = typeof window !== "undefined" ? window.location.host : "your-master";

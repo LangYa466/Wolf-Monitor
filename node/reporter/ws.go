@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
-	"strings"
 	"sync"
 	"time"
 
@@ -92,9 +91,6 @@ func (w *WSReporter) Send(r collector.Report) error {
 		// Drop the dead connection so the next Send reconnects.
 		_ = w.conn.Close()
 		w.conn = nil
-		if strings.Contains(err.Error(), "broken pipe") {
-			return err
-		}
 		return err
 	}
 	return nil

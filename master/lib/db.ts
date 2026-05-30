@@ -29,7 +29,10 @@ export function getPool(): Pool {
 }
 
 // Enable SSL for managed Postgres unless explicitly disabled. `?sslmode=disable`
-// in the URL or PGSSL=disable turns it off (e.g. local dev).
+// in the URL or PGSSL=disable turns it off (e.g. local dev). Otherwise the
+// server certificate is VERIFIED by default — supply a CA via PG_CA_CERT (PEM
+// or base64-PEM) for private CAs, or set PGSSL=no-verify as a last resort for
+// providers that ship incomplete chains.
 function sslOption(connectionString: string) {
   if (
     process.env.PGSSL === "disable" ||
@@ -37,7 +40,16 @@ function sslOption(connectionString: string) {
   ) {
     return undefined;
   }
-  return { rejectUnauthorized: false };
+  if (process.env.PGSSL === "no-verify") {
+    return { rejectUnauthorized: false };
+  }
+  const caRaw = process.env.PG_CA_CERT;
+  const ca = caRaw
+    ? caRaw.includes("BEGIN CERTIFICATE")
+      ? caRaw
+      : Buffer.from(caRaw, "base64").toString("utf8")
+    : undefined;
+  return { rejectUnauthorized: true, ca };
 }
 
 const SCHEMA = `
