@@ -1,0 +1,63 @@
+name: Bug report
+description: Something isn't working as documented
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please check the [Troubleshooting](https://github.com/LangYa466/Wolf-Monitor/wiki/Caveats-and-Troubleshooting) page first — most issues (Vercel cron, DB TLS, transport choice, ICMP) are covered there.
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      options:
+        - node (Go probe)
+        - master (dashboard / API)
+        - installer (install.sh / install.ps1)
+        - other
+    validations:
+      required: true
+  - type: dropdown
+    id: deployment
+    attributes:
+      label: Master deployment
+      options:
+        - Vercel
+        - Self-host (server.js)
+        - Not applicable
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version / commit
+      placeholder: "v1.0.0 or commit sha"
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you expected vs. what actually happened.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. ...
+        2. ...
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / errors
+      description: Node log, browser console, master logs, or the failing HTTP status. Redact tokens.
+      render: shell
+  - type: input
+    id: env
+    attributes:
+      label: Environment
+      placeholder: "OS/arch, Postgres provider (Neon/Supabase/...), browser"

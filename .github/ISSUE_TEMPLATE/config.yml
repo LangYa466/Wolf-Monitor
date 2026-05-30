@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 📖 Documentation (Wiki)
+    url: https://github.com/LangYa466/Wolf-Monitor/wiki
+    about: Deployment, configuration, notifications, FAQ.
+  - name: 🛠 Troubleshooting & Caveats
+    url: https://github.com/LangYa466/Wolf-Monitor/wiki/Caveats-and-Troubleshooting
+    about: Check the common issues before opening a bug.

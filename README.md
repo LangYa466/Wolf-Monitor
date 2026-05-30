@@ -1,5 +1,12 @@
 # Wolf-Monitor 🐺
 
+[![Release](https://img.shields.io/github/v/release/LangYa466/Wolf-Monitor?sort=semver)](https://github.com/LangYa466/Wolf-Monitor/releases)
+[![Release build](https://github.com/LangYa466/Wolf-Monitor/actions/workflows/release.yml/badge.svg)](https://github.com/LangYa466/Wolf-Monitor/actions/workflows/release.yml)
+[![License](https://img.shields.io/github/license/LangYa466/Wolf-Monitor)](LICENSE)
+[![Stars](https://img.shields.io/github/stars/LangYa466/Wolf-Monitor?style=flat)](https://github.com/LangYa466/Wolf-Monitor/stargazers)
+![Go](https://img.shields.io/badge/node-Go-00ADD8?logo=go&logoColor=white)
+![Next.js](https://img.shields.io/badge/master-Next.js-000?logo=nextdotjs)
+
 Lightweight self-hosted server monitoring (探针 / probe), inspired by
 [komari-monitor-rs](https://github.com/GenshinMinecraft/komari-monitor-rs).
 
