@@ -68,15 +68,27 @@ fi
 info "platform: ${OS}/${ARCH}"
 info "download:  ${URL}"
 
+# Stop any running instance first — a running executable is busy (ETXTBSY), so
+# overwriting it on re-install would fail with "Failure writing output".
+if [ "$OS" = "linux" ] && command -v systemctl >/dev/null 2>&1; then
+  systemctl stop "$SERVICE" 2>/dev/null || true
+elif [ "$OS" = "darwin" ]; then
+  launchctl unload "/Library/LaunchDaemons/io.wolf.node.plist" 2>/dev/null || true
+fi
+
 mkdir -p "$INSTALL_DIR"
+# Download to a temp file then move into place, so a failed/partial download
+# never clobbers a working binary.
+TMP="$(mktemp)"
 if command -v curl >/dev/null 2>&1; then
-  curl -fsSL "$URL" -o "$BIN" || err "download failed"
+  curl -fsSL "$URL" -o "$TMP" || err "download failed"
 elif command -v wget >/dev/null 2>&1; then
-  wget -qO "$BIN" "$URL" || err "download failed"
+  wget -qO "$TMP" "$URL" || err "download failed"
 else
   err "need curl or wget"
 fi
-chmod +x "$BIN"
+chmod +x "$TMP"
+mv -f "$TMP" "$BIN"
 
 ARGS="-e ${ENDPOINT} -t ${TOKEN} -transport ${TRANSPORT} -interval ${INTERVAL}"
 [ "${INSECURE:-0}" = "1" ] && ARGS="$ARGS -insecure"
