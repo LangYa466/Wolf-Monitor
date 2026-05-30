@@ -141,6 +141,10 @@ function ServersSection({ nodes }: { nodes: NodeView[] }) {
 
   const origin = typeof window !== "undefined" ? window.location.host : "your-master";
   const proto = typeof window !== "undefined" && window.location.protocol === "https:" ? "wss" : "ws";
+  // http(s) base for install commands. HTTP transport works on both Vercel
+  // (serverless can't hold a WebSocket) and self-host, so it's the safe default.
+  const base = `${proto === "wss" ? "https" : "http"}://${origin}`;
+  const tok = nodeToken || "TOKEN";
 
   return (
     <Card>
@@ -155,11 +159,20 @@ function ServersSection({ nodes }: { nodes: NodeView[] }) {
             <Button variant="outline" size="sm" onClick={rotate}>Rotate</Button>
           </div>
         </Field>
-        <div className="rounded-md bg-muted/60 p-3 text-xs">
-          <div className="mb-1 text-muted-foreground">One-click install (Linux):</div>
+        <div className="space-y-2 rounded-md bg-muted/60 p-3 text-xs">
+          <div className="text-muted-foreground">
+            One-click install · Linux/macOS (HTTP transport — works on Vercel &amp; self-host):
+          </div>
           <code className="block break-all text-primary">
-            wget -qO- https://raw.githubusercontent.com/LangYa466/Wolf-Monitor/main/node/install.sh | sudo bash -s -- -e {proto === "wss" ? "https" : "http"}://{origin} -t {nodeToken || "TOKEN"}
+            {`wget -qO- https://raw.githubusercontent.com/LangYa466/Wolf-Monitor/main/node/install.sh | sudo bash -s -- -e ${base} -t ${tok} -T http`}
           </code>
+          <div className="text-muted-foreground">Windows (elevated PowerShell):</div>
+          <code className="block break-all text-primary">
+            {`powershell -NoProfile -ExecutionPolicy Bypass -Command "iwr 'https://raw.githubusercontent.com/LangYa466/Wolf-Monitor/main/node/install.ps1' -UseBasicParsing -OutFile 'install.ps1'; & '.\\install.ps1' '-e' '${base}' '-t' '${tok}' '-T' 'http'"`}
+          </code>
+          <div className="text-muted-foreground">
+            Self-hosting with WebSocket? Drop <code className="text-primary">-T http</code> (and point at the <code className="text-primary">ws(s)://</code> endpoint).
+          </div>
         </div>
 
         <Field label="ipinfo.io token (optional — higher geo lookup limits)">
