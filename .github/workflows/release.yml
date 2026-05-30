@@ -1,8 +1,10 @@
 name: release-node
 
 # Build the wolf-node probe for every supported platform and attach the
-# binaries to the GitHub Release. The install.sh / install.ps1 scripts download
-# assets named  wolf-node_<os>_<arch>[.exe]  — keep this matrix in sync.
+# binaries to the GitHub Release. Built in a SINGLE job (Go cross-compiles
+# trivially) and uploaded once, so the matrix jobs can't race each other on the
+# release create/update. Asset names must match the install.sh / install.ps1
+# downloaders:  wolf-node_<os>_<arch>[.exe]
 on:
   push:
     tags: ["v*"]
@@ -12,35 +14,35 @@ permissions:
   contents: write
 
 jobs:
-  build:
+  release:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        include:
-          - { goos: linux, goarch: amd64 }
-          - { goos: linux, goarch: arm64 }
-          - { goos: darwin, goarch: amd64 }
-          - { goos: darwin, goarch: arm64 }
-          - { goos: windows, goarch: amd64, ext: .exe }
-          - { goos: windows, goarch: arm64, ext: .exe }
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-go@v6
         with:
           go-version: "1.26"
           cache-dependency-path: node/go.sum
-      - name: Build
+      - name: Build all targets
         working-directory: node
         env:
-          GOOS: ${{ matrix.goos }}
-          GOARCH: ${{ matrix.goarch }}
           CGO_ENABLED: "0"
         run: |
-          out="wolf-node_${{ matrix.goos }}_${{ matrix.goarch }}${{ matrix.ext }}"
-          go build -trimpath -ldflags "-s -w" -o "$out" .
-          echo "ASSET=node/$out" >> "$GITHUB_ENV"
+          mkdir -p dist
+          build() {
+            local os="$1" arch="$2" ext="$3"
+            echo "→ wolf-node_${os}_${arch}${ext}"
+            GOOS="$os" GOARCH="$arch" go build -trimpath -ldflags "-s -w" \
+              -o "dist/wolf-node_${os}_${arch}${ext}" .
+          }
+          build linux   amd64 ""
+          build linux   arm64 ""
+          build darwin  amd64 ""
+          build darwin  arm64 ""
+          build windows amd64 .exe
+          build windows arm64 .exe
+          ls -la dist
       - name: Upload to release
         uses: softprops/action-gh-release@v2
         with:
-          files: ${{ env.ASSET }}
+          files: node/dist/wolf-node_*
           fail_on_unmatched_files: true
