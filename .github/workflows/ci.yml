@@ -32,15 +32,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+      - run: corepack enable
       - uses: actions/setup-node@v5
         with:
           node-version: "22"
-          cache: npm
-          cache-dependency-path: master/package-lock.json
+          cache: pnpm
+          cache-dependency-path: master/pnpm-lock.yaml
       - name: install + build
         working-directory: master
         env:
           NEXT_TELEMETRY_DISABLED: "1"
         run: |
-          npm ci
-          npm run build
+          pnpm install --frozen-lockfile
+          pnpm build

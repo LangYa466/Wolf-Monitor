@@ -64,13 +64,13 @@ created automatically on first request (`CREATE TABLE IF NOT EXISTS`):
 
 ```sh
 cp .env.example .env        # set DATABASE_URL only
-npm install
+pnpm install
 
 # (a) plain Next.js — nodes must use transport: http
-npm run dev                 # http://localhost:3000
+pnpm dev                 # http://localhost:3000
 
 # (b) custom server with the node WebSocket endpoint
-npm run dev:ws              # http://localhost:8080  + ws /api/ws/node
+pnpm dev:ws              # http://localhost:8080  + ws /api/ws/node
 ```
 
 Open the app, complete `/setup` to create the admin account, then copy the
@@ -80,7 +80,7 @@ Open the app, complete `/setup` to create the admin account, then copy the
 # websocket (needs dev:ws / start:ws)
 ../node/wolf-node -e ws://localhost:8080 -t "<NODE_TOKEN>"
 
-# http (works against npm run dev too)
+# http (works against pnpm dev too)
 ../node/wolf-node -e http://localhost:3000 -t "<NODE_TOKEN>" -transport http
 ```
 
@@ -106,8 +106,8 @@ and use the CDN hostname as the node endpoint.
 ## Self-host (with node WebSocket)
 
 ```sh
-npm run build
-DATABASE_URL=postgres://... PORT=8080 npm run start:ws
+pnpm build
+DATABASE_URL=postgres://... PORT=8080 pnpm start:ws
 ```
 
 `server.js` serves both the dashboard and the `/api/ws/node` websocket on the
@@ -115,8 +115,11 @@ same port.
 
 ## Monitoring & notifications
 
-Configured from the **Settings** page (`/settings`) and evaluated by
-`/api/cron/check` (Vercel Cron on Vercel, the `server.js` loop when self-hosted).
+Configured from the **Settings** page (`/settings`). Evaluation is **self-driven**:
+every node report triggers a throttled evaluation (~once/min, claimed atomically),
+and the self-host `server.js` also runs a 30s loop. **No external cron or Vercel
+Cron is required** — alerts work on any host (including Vercel Hobby) as long as a
+node is reporting.
 
 - **负载通知 / Load alerts** — fire when a metric (CPU / RAM / DISK) stays at or
   above a threshold for at least a *time-ratio* of the samples within a trailing
@@ -143,10 +146,11 @@ DB) or via environment variables as a fallback:
 | Telegram | token / chat / thread / endpoint | `NOTIFY_TELEGRAM_TOKEN` + `NOTIFY_TELEGRAM_CHAT` |
 | Webhook | webhook URL | `NOTIFY_WEBHOOK_URL` |
 
-> **Cron frequency on Vercel:** `vercel.json` schedules `/api/cron/check` every
-> minute. Frequent crons need a Vercel **Pro** plan; on Hobby, point an external
-> uptime pinger at `/api/cron/check` (send `Authorization: Bearer <CRON_SECRET>`)
-> instead.
+> **Edge case:** if *every* node stops reporting (or a single-node deployment
+> whose only node dies), there's no report to drive evaluation, so that last
+> offline isn't detected. Cover it — only if you need it — with an external ping
+> every few minutes to `/api/cron/check` (send `Authorization: Bearer <CRON_SECRET>`
+> if set). Most multi-node setups don't need this.
 
 The Settings APIs are guarded by the **admin session** (login cookie) — no
 token header needed.
@@ -158,7 +162,7 @@ Only `DATABASE_URL` is required; the rest are rarely-needed optionals.
 | Var | Required | Notes |
 |-----|----------|-------|
 | `DATABASE_URL` | **yes** | remote PostgreSQL connection string |
-| `CRON_SECRET` | no | if set, `/api/cron/check` requires `Authorization: Bearer <secret>` (Vercel Cron sends it automatically) |
+| `CRON_SECRET` | no | optional: secures `/api/cron/check` for the all-nodes-down edge case (Vercel Cron sends it automatically if you re-enable a cron) |
 | `NOTIFY_TELEGRAM_TOKEN` / `NOTIFY_TELEGRAM_CHAT` / `NOTIFY_WEBHOOK_URL` | no | notification fallback when not configured in Settings |
 | `PG_POOL_MAX` | no | max pool connections (default 4) |
 | `PGSSL` | no | set to `disable` to turn off SSL |

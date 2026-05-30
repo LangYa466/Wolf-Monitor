@@ -1,4 +1,5 @@
-import { ensureSchema, getPool, OFFLINE_AFTER_MS } from "./db";
+import { ensureSchema, getPool, OFFLINE_AFTER_MS, pruneHistory } from "./db";
+import { pruneAuthAttempts } from "./auth";
 import { notify } from "./notify";
 import type {
   AlertMetric,
@@ -247,26 +248,35 @@ export interface EvalSummary {
 // minute regardless of how many reports arrive.
 const EVAL_MIN_INTERVAL_MS = 45_000;
 
-// maybeEvaluate runs evaluate() at most once per EVAL_MIN_INTERVAL_MS, claiming
-// the slot atomically so concurrent reports (serverless) don't double-run. This
-// lets alerts work on platforms without a frequent cron (e.g. Vercel Hobby):
-// as long as any node keeps reporting, evaluation keeps ticking. Returns true
-// if this call performed the evaluation.
-export async function maybeEvaluate(): Promise<boolean> {
-  await ensureSchema();
+const PRUNE_MIN_INTERVAL_MS = 60 * 60 * 1000; // hourly retention cleanup
+
+// claimSlot atomically reserves a time-spaced slot: it returns true to at most
+// one concurrent caller per `intervalMs`. Used to throttle report-driven work.
+async function claimSlot(key: string, intervalMs: number): Promise<boolean> {
   const now = Date.now();
-  const cutoff = now - EVAL_MIN_INTERVAL_MS;
-  // Atomic claim: insert/update the lastEvalAt marker only if it's stale. The
-  // ON CONFLICT ... WHERE makes exactly one concurrent caller win the slot.
   const { rows } = await getPool().query(
     `INSERT INTO app_settings (key, value)
-       VALUES ('lastEvalAt', to_jsonb($1::bigint))
+       VALUES ($1, to_jsonb($2::bigint))
      ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
-       WHERE (app_settings.value #>> '{}')::bigint < $2
+       WHERE (app_settings.value #>> '{}')::bigint < $3
      RETURNING key`,
-    [now, cutoff]
+    [key, now, now - intervalMs]
   );
-  if (rows.length === 0) return false; // someone evaluated recently
+  return rows.length > 0;
+}
+
+// maybeEvaluate is the self-contained scheduler: node reports call it, and it
+// runs evaluate() at most once per EVAL_MIN_INTERVAL_MS (plus hourly retention
+// cleanup), claiming each slot atomically so concurrent reports don't double-run.
+// This is why alerts need no external cron — as long as any node reports,
+// evaluation keeps ticking. Returns true if this call performed the evaluation.
+export async function maybeEvaluate(): Promise<boolean> {
+  await ensureSchema();
+  if (await claimSlot("lastPruneAt", PRUNE_MIN_INTERVAL_MS)) {
+    await pruneHistory();
+    await pruneAuthAttempts();
+  }
+  if (!(await claimSlot("lastEvalAt", EVAL_MIN_INTERVAL_MS))) return false;
   await evaluate();
   return true;
 }

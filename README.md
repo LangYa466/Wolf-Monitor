@@ -39,8 +39,9 @@ Two parts:
 - **Node** collects metrics every few seconds and reports them. It speaks
   **WebSocket** by default (lowest latency, self-host) or **HTTP** for serverless
   masters.
-- **Master** authenticates each node with a shared `NODE_TOKEN`, writes the
-  latest state + a history row to **PostgreSQL**, and serves a live dashboard.
+- **Master** authenticates each node with a shared **node token** (generated at
+  setup), writes the latest state + a history row to **PostgreSQL**, and serves a
+  live dashboard.
 
 ## Quick start
 
@@ -48,8 +49,8 @@ Two parts:
 # 1. master — set DATABASE_URL + NODE_TOKEN, then run
 cd master
 cp .env.example .env
-npm install
-npm run dev:ws            # http://localhost:8080 (+ node websocket)
+pnpm install
+pnpm dev:ws            # http://localhost:8080 (+ node websocket)
 # open http://localhost:8080 → complete /setup (email + password),
 # then copy the node token from Settings → Servers
 
@@ -68,7 +69,7 @@ with its country flag.
   `DATABASE_URL`, deploy, then complete `/setup`. Run nodes with
   `-transport http -e https://<app>.vercel.app -t <NODE_TOKEN>`. Works behind
   Cloudflare/any CDN.
-- **Master self-hosted**: `npm run start:ws` serves the dashboard and the node
+- **Master self-hosted**: `pnpm start:ws` serves the dashboard and the node
   websocket on one port.
 - **Node**: cross-compile for Linux/Windows (`GOOS=... go build`) and run as a
   systemd service / Windows service.
@@ -85,7 +86,7 @@ load average · uptime · TCP connections · process count.
 ## Alerting & monitoring
 
 Configured from the dashboard **Settings** page, evaluated on a schedule
-(Vercel Cron / self-host loop), and delivered via Telegram and/or webhook:
+(driven by node reports + self-host loop), and delivered via Telegram and/or webhook:
 
 - **负载通知 / Load alerts** — CPU/RAM/DISK ≥ threshold for a time-ratio over a
   window (e.g. CPU ≥ 80% for 80% of 15 min), per-server or all.
