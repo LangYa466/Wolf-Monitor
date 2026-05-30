@@ -93,3 +93,13 @@ Configured from the dashboard **Settings** page, evaluated on a schedule
   drop and on recovery.
 - **延迟监测 / Latency monitors** — selected nodes probe a target over TCP/ICMP
   on an interval; results shown on the `/latency` page.
+
+## Star History
+
+<a href="https://star-history.com/#LangYa466/Wolf-Monitor&Date">
+  <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=LangYa466/Wolf-Monitor&type=Date" width="600">
+</a>
+
+## License
+
+[MIT](LICENSE) © LangYa466

@@ -1,0 +1,46 @@
+name: ci
+
+# Build both components on every PR (and pushes to main) so broken builds are
+# caught before merge.
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  node:
+    name: node · go build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+          cache-dependency-path: node/go.sum
+      - name: vet + build
+        working-directory: node
+        run: |
+          go vet ./...
+          go build ./...
+
+  master:
+    name: master · next build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: master/package-lock.json
+      - name: install + build
+        working-directory: master
+        env:
+          NEXT_TELEMETRY_DISABLED: "1"
+        run: |
+          npm ci
+          npm run build
