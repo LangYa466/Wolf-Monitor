@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { currentUser } from "@/lib/session";
 import { ensureNodeToken } from "@/lib/auth";
-import { getSetting, setSetting } from "@/lib/db";
+import { getSetting, setSetting, PUBLIC_DASHBOARD_KEY } from "@/lib/db";
 import { randomBytes } from "crypto";
 
 // General settings: the node ingestion token (to paste into install commands)
@@ -15,7 +15,8 @@ export async function GET() {
   try {
     const nodeToken = await ensureNodeToken();
     const ipinfoToken = (await getSetting<string>("ipinfoToken")) ?? "";
-    return NextResponse.json({ nodeToken, ipinfoToken });
+    const publicDashboard = (await getSetting<boolean>(PUBLIC_DASHBOARD_KEY)) === true;
+    return NextResponse.json({ nodeToken, ipinfoToken, publicDashboard });
   } catch (err) {
     console.error(err);
     return NextResponse.json({ error: "storage error" }, { status: 500 });
@@ -33,9 +34,13 @@ export async function POST(req: NextRequest) {
     if (body.rotateNodeToken === true) {
       await setSetting("nodeToken", randomBytes(18).toString("base64url"));
     }
+    if (typeof body.publicDashboard === "boolean") {
+      await setSetting(PUBLIC_DASHBOARD_KEY, body.publicDashboard);
+    }
     const nodeToken = await ensureNodeToken();
     const ipinfoToken = (await getSetting<string>("ipinfoToken")) ?? "";
-    return NextResponse.json({ nodeToken, ipinfoToken });
+    const publicDashboard = (await getSetting<boolean>(PUBLIC_DASHBOARD_KEY)) === true;
+    return NextResponse.json({ nodeToken, ipinfoToken, publicDashboard });
   } catch (err) {
     console.error(err);
     return NextResponse.json({ error: "bad request" }, { status: 400 });

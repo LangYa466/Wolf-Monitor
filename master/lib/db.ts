@@ -182,6 +182,21 @@ export async function setSetting<T>(key: string, value: T): Promise<void> {
   );
 }
 
+// app_settings key: when true, unauthenticated visitors may view the live
+// dashboard (with sensitive fields stripped — see publicNodes). Default false.
+export const PUBLIC_DASHBOARD_KEY = "publicDashboard";
+
+export async function isPublicDashboard(): Promise<boolean> {
+  return (await getSetting<boolean>(PUBLIC_DASHBOARD_KEY)) === true;
+}
+
+// Strip sensitive fields from nodes before exposing them to guests. Currently
+// that's the IP; the rest (hostname, OS, country, live metrics) is non-sensitive
+// and is what makes the public "server live" view useful.
+export function publicNodes(nodes: NodeView[]): NodeView[] {
+  return nodes.map((n) => ({ ...n, ip: null }));
+}
+
 // ensureSchema runs the idempotent DDL exactly once per process.
 export function ensureSchema(): Promise<void> {
   if (!globalForDb.__llSchema) {
