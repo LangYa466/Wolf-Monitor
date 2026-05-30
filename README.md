@@ -3,6 +3,13 @@
 Lightweight self-hosted server monitoring (探针 / probe), inspired by
 [komari-monitor-rs](https://github.com/GenshinMinecraft/komari-monitor-rs).
 
+📖 **[Full documentation → the Wiki](https://github.com/LangYa466/Wolf-Monitor/wiki)** ·
+[Deploy](https://github.com/LangYa466/Wolf-Monitor/wiki/Deploy-Master) ·
+[Install nodes](https://github.com/LangYa466/Wolf-Monitor/wiki/Install-Nodes) ·
+[Configuration](https://github.com/LangYa466/Wolf-Monitor/wiki/Configuration) ·
+[FAQ](https://github.com/LangYa466/Wolf-Monitor/wiki/FAQ) ·
+[Troubleshooting](https://github.com/LangYa466/Wolf-Monitor/wiki/Caveats-and-Troubleshooting)
+
 Two parts:
 
 | Folder | What | Stack |
