@@ -92,6 +92,7 @@ export default function SettingsView() {
 function ServersSection({ nodes }: { nodes: NodeView[] }) {
   const [nodeToken, setNodeToken] = useState("");
   const [ipinfoToken, setIpinfoToken] = useState("");
+  const [publicDashboard, setPublicDashboard] = useState(false);
   const [order, setOrder] = useState<NodeView[]>(nodes);
   const [dragId, setDragId] = useState<string | null>(null);
   const [msg, setMsg] = useState("");
@@ -103,9 +104,21 @@ function ServersSection({ nodes }: { nodes: NodeView[] }) {
       .then((d) => {
         setNodeToken(d.nodeToken ?? "");
         setIpinfoToken(d.ipinfoToken ?? "");
+        setPublicDashboard(d.publicDashboard === true);
       })
       .catch(() => {});
   }, []);
+
+  async function togglePublic(v: boolean) {
+    setPublicDashboard(v); // optimistic
+    const res = await api("/api/settings", "POST", { publicDashboard: v });
+    if (res.ok) {
+      setMsg(v ? "Public dashboard enabled." : "Public dashboard disabled.");
+    } else {
+      setPublicDashboard(!v); // roll back on failure
+      setMsg("Failed to update public access.");
+    }
+  }
 
   async function saveIpinfo() {
     const res = await api("/api/settings", "POST", { ipinfoToken });
@@ -153,6 +166,16 @@ function ServersSection({ nodes }: { nodes: NodeView[] }) {
         <CardDescription>Node install token, geo lookup, and drag-to-reorder.</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
+        <div className="flex items-start justify-between gap-4 rounded-md border border-border bg-muted/40 p-3">
+          <div className="min-w-0">
+            <Label className="text-sm text-foreground">公开仪表盘 · Public dashboard</Label>
+            <p className="mt-1 text-xs text-muted-foreground">
+              访客无需登录即可查看服务器实时状态(server live)。敏感信息(如 IP)会自动隐藏。
+            </p>
+          </div>
+          <Switch checked={publicDashboard} onCheckedChange={togglePublic} />
+        </div>
+
         <Field label="Node token (use in install -t)">
           <div className="flex gap-2">
             <Input readOnly value={nodeToken} className="font-mono" onFocus={(e) => e.currentTarget.select()} />
@@ -201,7 +224,7 @@ function ServersSection({ nodes }: { nodes: NodeView[] }) {
                   <img src={flagUrl(n.country)} alt={n.country} width={18} height={13} className="rounded-[2px]" />
                 )}
                 <span className="font-medium">{n.host.hostname}</span>
-                <span className={`ml-auto h-2 w-2 rounded-full ${n.online ? "bg-primary" : "bg-destructive"}`} />
+                <span className={`ml-auto h-2 w-2 rounded-full ${n.online ? "bg-success" : "bg-destructive"}`} />
               </div>
             ))}
           </div>
@@ -439,7 +462,7 @@ function OfflineRow({ setting, onSave }: { setting: OfflineSetting; onSave: (id:
       <TableCell className="font-medium">{setting.nodeId}</TableCell>
       <TableCell><Switch checked={enabled} onCheckedChange={setEnabled} /></TableCell>
       <TableCell><Input className="w-24" type="number" value={grace} onChange={(e) => setGrace(Number(e.target.value))} /></TableCell>
-      <TableCell>{setting.offline ? <Badge variant="destructive">offline</Badge> : <Badge variant="default">online</Badge>}</TableCell>
+      <TableCell>{setting.offline ? <Badge variant="destructive">offline</Badge> : <Badge variant="success">online</Badge>}</TableCell>
       <TableCell><Button variant="outline" size="sm" onClick={() => onSave(setting.nodeId, enabled, grace)}>Save</Button></TableCell>
     </TableRow>
   );

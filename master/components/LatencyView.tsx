@@ -94,7 +94,7 @@ export default function LatencyView() {
                       <span
                         className={cn(
                           "h-2.5 w-2.5 shrink-0 rounded-full",
-                          t.enabled ? "bg-primary" : "bg-destructive",
+                          t.enabled ? "bg-success" : "bg-destructive",
                         )}
                       />
                       <span className="truncate" title={t.target}>
@@ -145,5 +145,5 @@ export default function LatencyView() {
 function latColor(ms: number): string {
   if (ms >= 250) return "text-destructive";
   if (ms >= 120) return "text-warning";
-  return "text-primary";
+  return "text-success";
 }

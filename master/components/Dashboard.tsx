@@ -6,6 +6,7 @@ import { ago, bps, bytes, flagUrl, osBadge, pct, uptime } from "@/lib/format";
 import { Card, CardContent } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { Select } from "@/components/ui/select";
+import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 
 const POLL_MS = 3000;
@@ -16,9 +17,11 @@ type SortMode = "custom" | "name" | "cpu" | "mem" | "country" | "status";
 export default function Dashboard({
   initial,
   dbError,
+  isPublic = false,
 }: {
   initial: NodeView[];
   dbError: string | null;
+  isPublic?: boolean;
 }) {
   const [nodes, setNodes] = useState<NodeView[]>(initial);
   const [error, setError] = useState<string | null>(dbError);
@@ -31,6 +34,11 @@ export default function Dashboard({
     async function poll() {
       try {
         const res = await fetch("/api/nodes", { cache: "no-store" });
+        // Public access was revoked (e.g. admin turned it off) → go sign in.
+        if (res.status === 401) {
+          location.href = "/login";
+          return;
+        }
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
         if (alive) {
@@ -62,12 +70,17 @@ export default function Dashboard({
   return (
     <div>
       <header className="mb-6 flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-xl font-semibold tracking-tight">
+        <h1 className="flex items-center gap-2 text-xl font-semibold tracking-tight">
           Servers <span className="font-normal text-muted-foreground">/ live</span>
+          {isPublic && (
+            <Badge variant="muted" className="font-normal" title="访客视图 · 已隐藏 IP 等敏感信息">
+              public view · IP hidden
+            </Badge>
+          )}
         </h1>
         <div className="flex items-center gap-4 text-sm text-muted-foreground tnum">
           <span className="flex items-center gap-1.5">
-            <span className="h-1.5 w-1.5 animate-[pulse_1.6s_ease-in-out_infinite] rounded-full bg-primary" />
+            <span className="h-1.5 w-1.5 animate-[pulse_1.6s_ease-in-out_infinite] rounded-full bg-success" />
             live
           </span>
           <span>
@@ -186,7 +199,7 @@ function NodeCard({ node }: { node: NodeView }) {
               className={cn(
                 "h-2.5 w-2.5 shrink-0 rounded-full",
                 node.online
-                  ? "bg-primary shadow-[0_0_0_3px_hsl(var(--primary)/0.15)]"
+                  ? "bg-success shadow-[0_0_0_3px_hsl(var(--success)/0.15)]"
                   : "bg-destructive shadow-[0_0_0_3px_hsl(var(--destructive)/0.12)]",
               )}
             />
