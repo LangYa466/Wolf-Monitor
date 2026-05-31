@@ -140,8 +140,8 @@ export default function SettingsView() {
         />
       </div>
 
-      {/* animated section content */}
-      <div key={tab} className="tab-fade-in">
+      {/* section content (no transition — instant switch) */}
+      <div key={tab}>
         {tab === "servers" && <ServersSection nodes={nodes} />}
         {tab === "notify" && <NotificationSettings />}
         {tab === "alerts" && <AlertRules nodeIds={nodeIds} />}
@@ -349,7 +349,7 @@ function ServersSection({ nodes }: { nodes: NodeView[] }) {
                   <span className={`ml-1 h-2 w-2 shrink-0 rounded-full ${n.online ? "bg-success" : "bg-destructive"}`} />
                 </div>
                 {openInstall === n.id && (
-                  <div className="tab-fade-in mt-1.5">
+                  <div className="mt-1.5">
                     <InstallSnippet base={base} tok={tok} hostname={n.host.hostname} />
                   </div>
                 )}
