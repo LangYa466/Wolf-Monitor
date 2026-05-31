@@ -1,10 +1,11 @@
 import "./globals.css";
 import type { Metadata, Viewport } from "next";
 import AppShell from "@/components/AppShell";
+import { I18nProvider } from "@/lib/i18n";
 
 export const metadata: Metadata = {
   title: "Wolf-Monitor",
-  description: "Wolf-Monitor — lightweight server monitoring (探针)",
+  description: "Wolf-Monitor — 輕量級伺服器監控 (探针)",
 };
 
 export const viewport: Viewport = {
@@ -19,7 +20,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en" className="dark">
+    <html lang="zh-Hant" className="dark">
       <head>
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="" />
@@ -29,7 +30,9 @@ export default function RootLayout({
         />
       </head>
       <body className="min-h-screen bg-background text-foreground antialiased">
-        <AppShell>{children}</AppShell>
+        <I18nProvider>
+          <AppShell>{children}</AppShell>
+        </I18nProvider>
       </body>
     </html>
   );

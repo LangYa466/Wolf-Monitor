@@ -114,7 +114,7 @@ EOF
   # `enable` registers the unit for boot autostart; `restart` starts it now.
   systemctl enable "${SERVICE}" >/dev/null 2>&1 || true
   systemctl restart "${SERVICE}"
-  info "installed '${SERVICE}' — started now AND enabled on boot ✓"
+  info "installed '${SERVICE}' — started now AND enabled on boot [OK]"
   info "logs: journalctl -u ${SERVICE} -f"
 elif [ "$OS" = "darwin" ]; then
   PLIST="/Library/LaunchDaemons/io.wolf.node.plist"
@@ -134,7 +134,7 @@ EOF
   launchctl unload "$PLIST" 2>/dev/null || true
   launchctl load "$PLIST"
   # RunAtLoad in the plist makes launchd start it at every boot.
-  info "installed launchd daemon 'io.wolf.node' — runs now AND on boot ✓"
+  info "installed launchd daemon 'io.wolf.node' — runs now AND on boot [OK]"
 else
   info "no service manager found — run manually:"
   info "  ${BIN} ${ARGS}"

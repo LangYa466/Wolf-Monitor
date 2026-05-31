@@ -6,10 +6,13 @@ import { ago } from "@/lib/format";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
+import { useI18n } from "@/lib/i18n";
+import { AlertTriangle } from "lucide-react";
 
 const POLL_MS = 5000;
 
 export default function LatencyView() {
+  const { t } = useI18n();
   const [tasks, setTasks] = useState<PingTask[]>([]);
   const [results, setResults] = useState<PingResult[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -56,59 +59,58 @@ export default function LatencyView() {
     <div>
       <header className="mb-6 flex flex-wrap items-baseline justify-between gap-3">
         <h1 className="text-xl font-semibold tracking-tight">
-          Latency <span className="font-normal text-muted-foreground">/ 延迟监测</span>
+          {t("latTitle")} <span className="font-normal text-muted-foreground">/ {t("latSub")}</span>
         </h1>
         <div className="text-sm text-muted-foreground">
-          <b className="text-foreground">{tasks.length}</b> monitors
+          <b className="text-foreground">{tasks.length}</b> {t("monitors")}
         </div>
       </header>
 
       {error && (
         <Card className="mb-4 border-destructive/60">
-          <CardContent className="p-4 text-sm text-destructive">⚠️ {error}</CardContent>
+          <CardContent className="flex items-center gap-2 p-4 text-sm text-destructive"><AlertTriangle className="size-4 shrink-0" /> {error}</CardContent>
         </Card>
       )}
 
       {tasks.length === 0 ? (
         <div className="py-20 text-center text-muted-foreground">
-          <p className="mb-2">No latency monitors yet.</p>
+          <p className="mb-2">{t("noMonitorsYet")}</p>
           <p className="text-sm">
-            Add one under{" "}
+            {t("addUnder")}{" "}
             <a className="text-primary underline-offset-4 hover:underline" href="/settings">
-              Settings → Latency monitors
+              {t("settingsLatency")}
             </a>
-            .
           </p>
         </div>
       ) : (
         <div className="grid grid-cols-[repeat(auto-fill,minmax(330px,1fr))] gap-4">
-          {tasks.map((t) => {
-            const rows = (byTask.get(t.id) ?? []).sort((a, b) =>
+          {tasks.map((task) => {
+            const rows = (byTask.get(task.id) ?? []).sort((a, b) =>
               a.nodeId.localeCompare(b.nodeId),
             );
             return (
-              <Card key={t.id}>
+              <Card key={task.id}>
                 <CardContent className="p-4">
                   <div className="mb-1 flex items-center justify-between gap-2">
                     <div className="flex min-w-0 items-center gap-2 font-semibold">
                       <span
                         className={cn(
                           "h-2.5 w-2.5 shrink-0 rounded-full",
-                          t.enabled ? "bg-success" : "bg-destructive",
+                          task.enabled ? "bg-success" : "bg-destructive",
                         )}
                       />
-                      <span className="truncate" title={t.target}>
-                        {t.name}
+                      <span className="truncate" title={task.target}>
+                        {task.name}
                       </span>
                     </div>
                     <Badge variant="muted">
-                      {t.type.toUpperCase()} · {t.intervalSeconds}s
+                      {task.type.toUpperCase()} · {task.intervalSeconds}s
                     </Badge>
                   </div>
-                  <div className="mb-3 text-xs text-muted-foreground">{t.target}</div>
+                  <div className="mb-3 text-xs text-muted-foreground">{task.target}</div>
 
                   {rows.length === 0 ? (
-                    <div className="text-sm text-muted-foreground">waiting for samples…</div>
+                    <div className="text-sm text-muted-foreground">{t("waitingSamples")}</div>
                   ) : (
                     <table className="w-full text-sm">
                       <tbody>
@@ -121,7 +123,7 @@ export default function LatencyView() {
                                   {r.latencyMs.toFixed(1)} ms
                                 </span>
                               ) : (
-                                <span className="text-destructive">timeout</span>
+                                <span className="text-destructive">{t("timeout")}</span>
                               )}
                             </td>
                             <td className="w-16 py-1 text-right text-[11px] text-muted-foreground">

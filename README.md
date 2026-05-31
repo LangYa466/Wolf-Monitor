@@ -1,4 +1,4 @@
-# Wolf-Monitor 🐺
+# Wolf-Monitor
 
 [![Release](https://img.shields.io/github/v/release/LangYa466/Wolf-Monitor?sort=semver)](https://github.com/LangYa466/Wolf-Monitor/releases)
 [![Release build](https://github.com/LangYa466/Wolf-Monitor/actions/workflows/release.yml/badge.svg)](https://github.com/LangYa466/Wolf-Monitor/actions/workflows/release.yml)
@@ -10,7 +10,7 @@
 Lightweight self-hosted server monitoring (探针 / probe), inspired by
 [komari-monitor-rs](https://github.com/GenshinMinecraft/komari-monitor-rs).
 
-📖 **[Full documentation → the Wiki](https://github.com/LangYa466/Wolf-Monitor/wiki)** ·
+**[Full documentation → the Wiki](https://github.com/LangYa466/Wolf-Monitor/wiki)** ·
 [Deploy](https://github.com/LangYa466/Wolf-Monitor/wiki/Deploy-Master) ·
 [Install nodes](https://github.com/LangYa466/Wolf-Monitor/wiki/Install-Nodes) ·
 [Configuration](https://github.com/LangYa466/Wolf-Monitor/wiki/Configuration) ·

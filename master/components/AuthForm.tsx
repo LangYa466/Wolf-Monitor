@@ -11,6 +11,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Radar } from "lucide-react";
 
 export default function AuthForm({ mode }: { mode: "setup" | "login" }) {
   const [email, setEmail] = useState("");
@@ -59,8 +60,8 @@ export default function AuthForm({ mode }: { mode: "setup" | "login" }) {
     <div className="mx-auto flex min-h-[70vh] max-w-md items-center">
       <Card className="w-full">
         <CardHeader>
-          <CardTitle className="text-lg">
-            🐺 Wolf-Monitor — {isSetup ? "Setup" : "Sign in"}
+          <CardTitle className="flex items-center gap-2 text-lg">
+            <Radar className="size-5 text-primary" /> Wolf-Monitor — {isSetup ? "Setup" : "Sign in"}
           </CardTitle>
           <CardDescription>
             {isSetup

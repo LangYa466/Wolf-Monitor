@@ -161,6 +161,13 @@ CREATE INDEX IF NOT EXISTS auth_attempts_scope_ts ON auth_attempts (scope, ts DE
 ALTER TABLE nodes ADD COLUMN IF NOT EXISTS ip TEXT;
 ALTER TABLE nodes ADD COLUMN IF NOT EXISTS country TEXT;
 ALTER TABLE nodes ADD COLUMN IF NOT EXISTS sort_order INTEGER NOT NULL DEFAULT 1000000;
+
+-- Extra history series for the per-server detail charts (process count,
+-- TCP connections, absolute memory/swap usage). Added after initial release.
+ALTER TABLE metrics_history ADD COLUMN IF NOT EXISTS procs     BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE metrics_history ADD COLUMN IF NOT EXISTS tcp       BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE metrics_history ADD COLUMN IF NOT EXISTS mem_used  BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE metrics_history ADD COLUMN IF NOT EXISTS swap_used BIGINT NOT NULL DEFAULT 0;
 `;
 
 // Generic key/value settings (notification config, etc.).
@@ -245,8 +252,9 @@ export async function saveReport(
 
   await pool.query(
     `INSERT INTO metrics_history
-       (node_id, ts, cpu, mem_pct, disk_pct, net_up, net_down, disk_r, disk_w)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+       (node_id, ts, cpu, mem_pct, disk_pct, net_up, net_down, disk_r, disk_w,
+        procs, tcp, mem_used, swap_used)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
     [
       id,
       now,
@@ -257,6 +265,10 @@ export async function saveReport(
       m.netDownSpeed,
       m.diskReadSpeed,
       m.diskWriteSpeed,
+      m.procs,
+      m.tcpConns,
+      m.memUsed,
+      m.swapUsed,
     ]
   );
 
@@ -344,20 +356,33 @@ export interface HistoryPoint {
   netDown: number;
   diskR: number;
   diskW: number;
+  procs: number;
+  tcp: number;
+  memUsed: number;
+  swapUsed: number;
 }
 
 export async function getHistory(
   nodeId: string,
-  limit = 120
+  limit = 120,
+  sinceMs?: number
 ): Promise<HistoryPoint[]> {
   await ensureSchema();
+  const params: (string | number)[] = [nodeId];
+  let where = `node_id = $1`;
+  if (sinceMs && sinceMs > 0) {
+    params.push(sinceMs);
+    where += ` AND ts >= $${params.length}`;
+  }
+  params.push(limit);
   const { rows } = await getPool().query(
-    `SELECT ts, cpu, mem_pct, disk_pct, net_up, net_down, disk_r, disk_w
+    `SELECT ts, cpu, mem_pct, disk_pct, net_up, net_down, disk_r, disk_w,
+            procs, tcp, mem_used, swap_used
        FROM metrics_history
-      WHERE node_id = $1
+      WHERE ${where}
       ORDER BY ts DESC
-      LIMIT $2`,
-    [nodeId, limit]
+      LIMIT $${params.length}`,
+    params
   );
   return rows
     .map((r) => ({
@@ -369,6 +394,10 @@ export async function getHistory(
       netDown: Number(r.net_down),
       diskR: Number(r.disk_r),
       diskW: Number(r.disk_w),
+      procs: Number(r.procs),
+      tcp: Number(r.tcp),
+      memUsed: Number(r.mem_used),
+      swapUsed: Number(r.swap_used),
     }))
     .reverse(); // chronological for charting
 }

@@ -33,6 +33,17 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { flagUrl } from "@/lib/format";
+import { useI18n } from "@/lib/i18n";
+import { GripVertical, Trash2, RotateCw, Check, Minus } from "lucide-react";
+
+// Renders a node's on/off state as an icon (no emoji).
+function OnOff({ on }: { on: boolean }) {
+  return on ? (
+    <Check className="size-4 text-success" aria-label="on" />
+  ) : (
+    <Minus className="size-4 text-muted-foreground" aria-label="off" />
+  );
+}
 
 // Authenticated mutation helper: on 401 bounce to /login.
 async function api(url: string, method: string, body?: unknown): Promise<Response> {
@@ -46,6 +57,7 @@ async function api(url: string, method: string, body?: unknown): Promise<Respons
 }
 
 export default function SettingsView() {
+  const { t } = useI18n();
   const [ready, setReady] = useState(false);
   const [nodes, setNodes] = useState<NodeView[]>([]);
 
@@ -65,7 +77,7 @@ export default function SettingsView() {
   }, []);
 
   if (!ready) {
-    return <p className="py-20 text-center text-muted-foreground">Loading…</p>;
+    return <p className="py-20 text-center text-muted-foreground">{t("loading")}</p>;
   }
 
   const nodeIds = nodes.map((n) => n.id);
@@ -74,7 +86,7 @@ export default function SettingsView() {
     <div className="space-y-5">
       <header className="mb-1">
         <h1 className="text-xl font-semibold tracking-tight">
-          Settings <span className="font-normal text-muted-foreground">/ 通知与监测</span>
+          {t("setTitle")} <span className="font-normal text-muted-foreground">/ {t("setSub")}</span>
         </h1>
       </header>
 
@@ -90,6 +102,7 @@ export default function SettingsView() {
 // ── Servers: token, ipinfo, drag reorder ────────────────────────────────────
 
 function ServersSection({ nodes }: { nodes: NodeView[] }) {
+  const { t } = useI18n();
   const [nodeToken, setNodeToken] = useState("");
   const [ipinfoToken, setIpinfoToken] = useState("");
   const [publicDashboard, setPublicDashboard] = useState(false);
@@ -113,23 +126,23 @@ function ServersSection({ nodes }: { nodes: NodeView[] }) {
     setPublicDashboard(v); // optimistic
     const res = await api("/api/settings", "POST", { publicDashboard: v });
     if (res.ok) {
-      setMsg(v ? "Public dashboard enabled." : "Public dashboard disabled.");
+      setMsg(v ? t("msgPublicOn") : t("msgPublicOff"));
     } else {
       setPublicDashboard(!v); // roll back on failure
-      setMsg("Failed to update public access.");
+      setMsg(t("msgPublicFail"));
     }
   }
 
   async function saveIpinfo() {
     const res = await api("/api/settings", "POST", { ipinfoToken });
-    setMsg(res.ok ? "Saved." : "Failed.");
+    setMsg(res.ok ? t("msgSaved") : t("msgFailed"));
   }
   async function rotate() {
     const res = await api("/api/settings", "POST", { rotateNodeToken: true });
     if (res.ok) {
       const d = await res.json();
       setNodeToken(d.nodeToken);
-      setMsg("Token rotated — update your nodes.");
+      setMsg(t("msgTokenRotated"));
     }
   }
   async function onDrop(targetId: string) {
@@ -145,10 +158,10 @@ function ServersSection({ nodes }: { nodes: NodeView[] }) {
     setDragId(null);
     const res = await api("/api/nodes/order", "POST", { order: next.map((n) => n.id) });
     if (res.ok) {
-      setMsg("Order saved.");
+      setMsg(t("msgOrderSaved"));
     } else {
       setOrder(prev); // roll back on failure
-      setMsg("Failed to save order.");
+      setMsg(t("msgOrderFail"));
     }
   }
 
@@ -162,53 +175,49 @@ function ServersSection({ nodes }: { nodes: NodeView[] }) {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>服务器 · Servers</CardTitle>
-        <CardDescription>Node install token, geo lookup, and drag-to-reorder.</CardDescription>
+        <CardTitle>{t("secServers")}</CardTitle>
+        <CardDescription>{t("secServersDesc")}</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="flex items-start justify-between gap-4 rounded-md border border-border bg-muted/40 p-3">
           <div className="min-w-0">
-            <Label className="text-sm text-foreground">公开仪表盘 · Public dashboard</Label>
-            <p className="mt-1 text-xs text-muted-foreground">
-              访客无需登录即可查看服务器实时状态(server live)。敏感信息(如 IP)会自动隐藏。
-            </p>
+            <Label className="text-sm text-foreground">{t("publicDash")}</Label>
+            <p className="mt-1 text-xs text-muted-foreground">{t("publicDashDesc")}</p>
           </div>
           <Switch checked={publicDashboard} onCheckedChange={togglePublic} />
         </div>
 
-        <Field label="Node token (use in install -t)">
+        <Field label={t("nodeTokenLabel")}>
           <div className="flex gap-2">
             <Input readOnly value={nodeToken} className="font-mono" onFocus={(e) => e.currentTarget.select()} />
-            <Button variant="outline" size="sm" onClick={rotate}>Rotate</Button>
+            <Button variant="outline" size="sm" onClick={rotate} className="[&_svg]:size-3.5">
+              <RotateCw /> {t("rotate")}
+            </Button>
           </div>
         </Field>
         <div className="space-y-2 rounded-md bg-muted/60 p-3 text-xs">
-          <div className="text-muted-foreground">
-            One-click install · Linux/macOS (HTTP transport — works on Vercel &amp; self-host):
-          </div>
+          <div className="text-muted-foreground">{t("installLinux")}</div>
           <code className="block break-all text-primary">
             {`wget -qO- https://raw.githubusercontent.com/LangYa466/Wolf-Monitor/main/node/install.sh | sudo bash -s -- -e ${base} -t ${tok} -T http`}
           </code>
-          <div className="text-muted-foreground">Windows (elevated PowerShell):</div>
+          <div className="text-muted-foreground">{t("installWin")}</div>
           <code className="block break-all text-primary">
             {`powershell -NoProfile -ExecutionPolicy Bypass -Command "iwr 'https://raw.githubusercontent.com/LangYa466/Wolf-Monitor/main/node/install.ps1' -UseBasicParsing -OutFile 'install.ps1'; & '.\\install.ps1' '-e' '${base}' '-t' '${tok}' '-T' 'http'"`}
           </code>
-          <div className="text-muted-foreground">
-            Self-hosting with WebSocket? Drop <code className="text-primary">-T http</code> (and point at the <code className="text-primary">ws(s)://</code> endpoint).
-          </div>
+          <div className="text-muted-foreground">{t("installWs")}</div>
         </div>
 
-        <Field label="ipinfo.io token (optional — higher geo lookup limits)">
+        <Field label={t("ipinfoLabel")}>
           <div className="flex gap-2">
-            <Input value={ipinfoToken} onChange={(e) => setIpinfoToken(e.target.value)} placeholder="ipinfo token" />
-            <Button variant="outline" size="sm" onClick={saveIpinfo}>Save</Button>
+            <Input value={ipinfoToken} onChange={(e) => setIpinfoToken(e.target.value)} placeholder={t("ipinfoPh")} />
+            <Button variant="outline" size="sm" onClick={saveIpinfo}>{t("save")}</Button>
           </div>
         </Field>
 
         <div>
-          <Label>自定义排序 · Drag to reorder</Label>
+          <Label>{t("customOrder")}</Label>
           <div className="mt-2 space-y-1.5">
-            {order.length === 0 && <p className="text-sm text-muted-foreground">no servers yet</p>}
+            {order.length === 0 && <p className="text-sm text-muted-foreground">{t("noServersYet")}</p>}
             {order.map((n) => (
               <div
                 key={n.id}
@@ -218,7 +227,7 @@ function ServersSection({ nodes }: { nodes: NodeView[] }) {
                 onDrop={() => onDrop(n.id)}
                 className="flex cursor-grab items-center gap-2 rounded-md border border-border bg-background px-3 py-2 text-sm active:cursor-grabbing"
               >
-                <span className="text-muted-foreground">⠿</span>
+                <GripVertical className="size-4 text-muted-foreground" />
                 {n.country && (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img src={flagUrl(n.country)} alt={n.country} width={18} height={13} className="rounded-[2px]" />
@@ -239,6 +248,7 @@ function ServersSection({ nodes }: { nodes: NodeView[] }) {
 // ── Notifications ───────────────────────────────────────────────────────────
 
 function NotificationSettings() {
+  const { t } = useI18n();
   const [cfg, setCfg] = useState<NotifyConfig | null>(null);
   const [msg, setMsg] = useState("");
   const [testing, setTesting] = useState(false);
@@ -255,7 +265,7 @@ function NotificationSettings() {
     return (
       <Card>
         <CardHeader>
-          <CardTitle>通知 · Notifications</CardTitle>
+          <CardTitle>{t("secNotify")}</CardTitle>
         </CardHeader>
       </Card>
     );
@@ -266,16 +276,16 @@ function NotificationSettings() {
 
   async function save() {
     const res = await api("/api/notify-config", "POST", cfg);
-    setMsg(res.ok ? "Saved." : "Failed.");
+    setMsg(res.ok ? t("msgSaved") : t("msgFailed"));
     if (res.ok) load();
   }
   async function test() {
     setTesting(true);
-    setMsg("Sending test…");
+    setMsg(t("msgSendingTest"));
     try {
       const res = await api("/api/notify-test", "POST", cfg);
       const d = await res.json().catch(() => ({}));
-      setMsg(res.ok ? "Test sent ✅" : `Test failed: ${d.error ?? res.status}`);
+      setMsg(res.ok ? t("msgTestSent") : `${t("msgTestFail")}${d.error ?? res.status}`);
     } finally {
       setTesting(false);
     }
@@ -284,18 +294,18 @@ function NotificationSettings() {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>通知 · Notifications</CardTitle>
+        <CardTitle>{t("secNotify")}</CardTitle>
         <CardDescription>
-          Template placeholders: <Ph>emoji</Ph> <Ph>event</Ph> <Ph>client</Ph> <Ph>message</Ph> <Ph>time</Ph>.
+          {t("notifyTplDesc")} <Ph>emoji</Ph> <Ph>event</Ph> <Ph>client</Ph> <Ph>message</Ph> <Ph>time</Ph>.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
         <label className="flex cursor-pointer items-center gap-2.5 text-sm">
           <Switch checked={cfg.enabled} onCheckedChange={(v) => setCfg({ ...cfg, enabled: v })} />
-          开启通知 · Enable notifications
+          {t("enableNotify")}
         </label>
 
-        <Field label="消息通知模板 · Message template">
+        <Field label={t("msgTemplate")}>
           <Textarea rows={6} className="font-mono text-[12.5px] leading-relaxed" value={cfg.template} onChange={(e) => setCfg({ ...cfg, template: e.target.value })} />
         </Field>
 
@@ -309,7 +319,7 @@ function NotificationSettings() {
         <Field label="message_thread_id">
           <Input value={tg.messageThreadId} onChange={(e) => setTg({ messageThreadId: e.target.value })} placeholder="Optional — supergroup topic id" />
         </Field>
-        <Field label="请求端点 · API endpoint *">
+        <Field label={t("apiEndpoint")}>
           <Input value={tg.endpoint} onChange={(e) => setTg({ endpoint: e.target.value })} placeholder="https://api.telegram.org/bot" />
         </Field>
 
@@ -319,8 +329,8 @@ function NotificationSettings() {
         </Field>
 
         <div className="flex flex-wrap items-center gap-3 pt-1">
-          <Button onClick={save}>Save</Button>
-          <Button variant="outline" size="sm" onClick={test} disabled={testing}>发送测试消息 · Send test</Button>
+          <Button onClick={save}>{t("save")}</Button>
+          <Button variant="outline" size="sm" onClick={test} disabled={testing}>{t("sendTest")}</Button>
           {msg && <span className="text-sm text-muted-foreground">{msg}</span>}
         </div>
       </CardContent>
@@ -331,6 +341,7 @@ function NotificationSettings() {
 // ── Load alert rules ────────────────────────────────────────────────────────
 
 function AlertRules({ nodeIds }: { nodeIds: string[] }) {
+  const { t } = useI18n();
   const [rules, setRules] = useState<AlertRule[]>([]);
   const [form, setForm] = useState<Partial<AlertRule>>(blankRule());
   const [msg, setMsg] = useState("");
@@ -349,7 +360,7 @@ function AlertRules({ nodeIds }: { nodeIds: string[] }) {
       setForm(blankRule());
       setMsg("");
       load();
-    } else setMsg("Failed.");
+    } else setMsg(t("msgFailed"));
   }
   async function remove(id: string) {
     if ((await api(`/api/alerts/${id}`, "DELETE")).ok) load();
@@ -358,16 +369,16 @@ function AlertRules({ nodeIds }: { nodeIds: string[] }) {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>负载通知 · Load alerts</CardTitle>
-        <CardDescription>Fire when a metric stays ≥ threshold for at least the time-ratio over the window.</CardDescription>
+        <CardTitle>{t("secAlerts")}</CardTitle>
+        <CardDescription>{t("secAlertsDesc")}</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>Name</TableHead><TableHead>Metric</TableHead><TableHead>Threshold</TableHead>
-              <TableHead>Ratio</TableHead><TableHead>Window</TableHead><TableHead>Servers</TableHead>
-              <TableHead>On</TableHead><TableHead />
+              <TableHead>{t("thName")}</TableHead><TableHead>{t("thMetric")}</TableHead><TableHead>{t("thThreshold")}</TableHead>
+              <TableHead>{t("thRatio")}</TableHead><TableHead>{t("thWindow")}</TableHead><TableHead>{t("thServers")}</TableHead>
+              <TableHead>{t("thOn")}</TableHead><TableHead />
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -378,31 +389,31 @@ function AlertRules({ nodeIds }: { nodeIds: string[] }) {
                 <TableCell>{r.threshold}%</TableCell>
                 <TableCell>{(r.ratio * 100).toFixed(0)}%</TableCell>
                 <TableCell>{r.windowMinutes}m</TableCell>
-                <TableCell className="max-w-[160px] truncate text-muted-foreground">{r.targets.length ? r.targets.join(", ") : "all"}</TableCell>
-                <TableCell>{r.enabled ? "✅" : "—"}</TableCell>
+                <TableCell className="max-w-[160px] truncate text-muted-foreground">{r.targets.length ? r.targets.join(", ") : t("all")}</TableCell>
+                <TableCell><OnOff on={r.enabled} /></TableCell>
                 <TableCell>
-                  <Button variant="ghost" size="sm" className="h-7 px-2 text-destructive" onClick={() => remove(r.id)}>✕</Button>
+                  <Button variant="ghost" size="sm" className="h-7 px-2 text-destructive [&_svg]:size-4" onClick={() => remove(r.id)}><Trash2 /></Button>
                 </TableCell>
               </TableRow>
             ))}
             {rules.length === 0 && (
-              <TableRow><TableCell colSpan={8} className="text-muted-foreground">no rules</TableCell></TableRow>
+              <TableRow><TableCell colSpan={8} className="text-muted-foreground">{t("noRules")}</TableCell></TableRow>
             )}
           </TableBody>
         </Table>
 
         <div className="flex flex-wrap items-center gap-2">
-          <Input className="w-36" placeholder="name" value={form.name ?? ""} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+          <Input className="w-36" placeholder={t("phName")} value={form.name ?? ""} onChange={(e) => setForm({ ...form, name: e.target.value })} />
           <Select className="w-24" value={form.metric} onChange={(e) => setForm({ ...form, metric: e.target.value as AlertMetric })}>
             <option value="cpu">CPU</option><option value="ram">RAM</option><option value="disk">DISK</option>
           </Select>
           <Input className="w-20" type="number" placeholder="80" value={form.threshold ?? ""} onChange={(e) => setForm({ ...form, threshold: Number(e.target.value) })} />
           <Input className="w-20" type="number" step="0.05" placeholder="0.8" value={form.ratio ?? ""} onChange={(e) => setForm({ ...form, ratio: Number(e.target.value) })} />
           <Input className="w-20" type="number" placeholder="15" value={form.windowMinutes ?? ""} onChange={(e) => setForm({ ...form, windowMinutes: Number(e.target.value) })} />
-          <Input className="w-56" placeholder="servers (blank = all)" value={(form.targets as unknown as string) ?? ""} onChange={(e) => setForm({ ...form, targets: e.target.value as unknown as string[] })} />
-          <Button onClick={submit}>Add</Button>
+          <Input className="w-56" placeholder={t("phServersBlank")} value={(form.targets as unknown as string) ?? ""} onChange={(e) => setForm({ ...form, targets: e.target.value as unknown as string[] })} />
+          <Button onClick={submit}>{t("add")}</Button>
         </div>
-        {nodeIds.length > 0 && <p className="text-xs text-muted-foreground">known: {nodeIds.join(", ")}</p>}
+        {nodeIds.length > 0 && <p className="text-xs text-muted-foreground">{t("known")}{nodeIds.join(", ")}</p>}
         {msg && <p className="text-sm text-destructive">{msg}</p>}
       </CardContent>
     </Card>
@@ -412,6 +423,7 @@ function AlertRules({ nodeIds }: { nodeIds: string[] }) {
 // ── Offline settings ────────────────────────────────────────────────────────
 
 function OfflineSettings({ nodes }: { nodes: NodeView[] }) {
+  const { t } = useI18n();
   const [settings, setSettings] = useState<OfflineSetting[]>([]);
 
   const load = useCallback(() => {
@@ -432,20 +444,20 @@ function OfflineSettings({ nodes }: { nodes: NodeView[] }) {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>离线通知 · Offline alerts</CardTitle>
-        <CardDescription>Notify when a server stops reporting beyond its grace period.</CardDescription>
+        <CardTitle>{t("secOffline")}</CardTitle>
+        <CardDescription>{t("secOfflineDesc")}</CardDescription>
       </CardHeader>
       <CardContent>
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>Server</TableHead><TableHead>Enabled</TableHead><TableHead>Grace (s)</TableHead><TableHead>Status</TableHead><TableHead />
+              <TableHead>{t("thServer")}</TableHead><TableHead>{t("thEnabled")}</TableHead><TableHead>{t("thGrace")}</TableHead><TableHead>{t("thStatus")}</TableHead><TableHead />
             </TableRow>
           </TableHeader>
           <TableBody>
             {rows.map((s) => <OfflineRow key={s.nodeId} setting={s} onSave={save} />)}
             {rows.length === 0 && (
-              <TableRow><TableCell colSpan={5} className="text-muted-foreground">no servers yet</TableCell></TableRow>
+              <TableRow><TableCell colSpan={5} className="text-muted-foreground">{t("noServersYet")}</TableCell></TableRow>
             )}
           </TableBody>
         </Table>
@@ -455,6 +467,7 @@ function OfflineSettings({ nodes }: { nodes: NodeView[] }) {
 }
 
 function OfflineRow({ setting, onSave }: { setting: OfflineSetting; onSave: (id: string, enabled: boolean, grace: number) => void }) {
+  const { t } = useI18n();
   const [enabled, setEnabled] = useState(setting.enabled);
   const [grace, setGrace] = useState(setting.graceSeconds);
   return (
@@ -462,8 +475,8 @@ function OfflineRow({ setting, onSave }: { setting: OfflineSetting; onSave: (id:
       <TableCell className="font-medium">{setting.nodeId}</TableCell>
       <TableCell><Switch checked={enabled} onCheckedChange={setEnabled} /></TableCell>
       <TableCell><Input className="w-24" type="number" value={grace} onChange={(e) => setGrace(Number(e.target.value))} /></TableCell>
-      <TableCell>{setting.offline ? <Badge variant="destructive">offline</Badge> : <Badge variant="success">online</Badge>}</TableCell>
-      <TableCell><Button variant="outline" size="sm" onClick={() => onSave(setting.nodeId, enabled, grace)}>Save</Button></TableCell>
+      <TableCell>{setting.offline ? <Badge variant="destructive">{t("stOffline")}</Badge> : <Badge variant="success">{t("stOnline")}</Badge>}</TableCell>
+      <TableCell><Button variant="outline" size="sm" onClick={() => onSave(setting.nodeId, enabled, grace)}>{t("save")}</Button></TableCell>
     </TableRow>
   );
 }
@@ -471,6 +484,7 @@ function OfflineRow({ setting, onSave }: { setting: OfflineSetting; onSave: (id:
 // ── Ping / latency tasks ────────────────────────────────────────────────────
 
 function PingTasks({ nodeIds }: { nodeIds: string[] }) {
+  const { t } = useI18n();
   const [tasks, setTasks] = useState<PingTask[]>([]);
   const [form, setForm] = useState<Partial<PingTask>>(blankTask());
   const [msg, setMsg] = useState("");
@@ -489,7 +503,7 @@ function PingTasks({ nodeIds }: { nodeIds: string[] }) {
       setForm(blankTask());
       setMsg("");
       load();
-    } else setMsg("Failed.");
+    } else setMsg(t("msgFailed"));
   }
   async function remove(id: string) {
     if ((await api(`/api/ping-tasks/${id}`, "DELETE")).ok) load();
@@ -498,48 +512,48 @@ function PingTasks({ nodeIds }: { nodeIds: string[] }) {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>延迟监测 · Latency monitors</CardTitle>
-        <CardDescription>Selected servers probe the target on the given interval.</CardDescription>
+        <CardTitle>{t("secPing")}</CardTitle>
+        <CardDescription>{t("secPingDesc")}</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>Name</TableHead><TableHead>Target</TableHead><TableHead>Type</TableHead>
-              <TableHead>Interval</TableHead><TableHead>Servers</TableHead><TableHead>On</TableHead><TableHead />
+              <TableHead>{t("thName")}</TableHead><TableHead>{t("thTarget")}</TableHead><TableHead>{t("thType")}</TableHead>
+              <TableHead>{t("thInterval")}</TableHead><TableHead>{t("thServers")}</TableHead><TableHead>{t("thOn")}</TableHead><TableHead />
             </TableRow>
           </TableHeader>
           <TableBody>
-            {tasks.map((t) => (
-              <TableRow key={t.id}>
-                <TableCell className="font-medium">{t.name}</TableCell>
-                <TableCell className="max-w-[160px] truncate text-muted-foreground">{t.target}</TableCell>
-                <TableCell>{t.type.toUpperCase()}</TableCell>
-                <TableCell>{t.intervalSeconds}s</TableCell>
-                <TableCell className="max-w-[140px] truncate text-muted-foreground">{t.nodeIds.length ? t.nodeIds.join(", ") : "all"}</TableCell>
-                <TableCell>{t.enabled ? "✅" : "—"}</TableCell>
+            {tasks.map((task) => (
+              <TableRow key={task.id}>
+                <TableCell className="font-medium">{task.name}</TableCell>
+                <TableCell className="max-w-[160px] truncate text-muted-foreground">{task.target}</TableCell>
+                <TableCell>{task.type.toUpperCase()}</TableCell>
+                <TableCell>{task.intervalSeconds}s</TableCell>
+                <TableCell className="max-w-[140px] truncate text-muted-foreground">{task.nodeIds.length ? task.nodeIds.join(", ") : t("all")}</TableCell>
+                <TableCell><OnOff on={task.enabled} /></TableCell>
                 <TableCell>
-                  <Button variant="ghost" size="sm" className="h-7 px-2 text-destructive" onClick={() => remove(t.id)}>✕</Button>
+                  <Button variant="ghost" size="sm" className="h-7 px-2 text-destructive [&_svg]:size-4" onClick={() => remove(task.id)}><Trash2 /></Button>
                 </TableCell>
               </TableRow>
             ))}
             {tasks.length === 0 && (
-              <TableRow><TableCell colSpan={7} className="text-muted-foreground">no monitors</TableCell></TableRow>
+              <TableRow><TableCell colSpan={7} className="text-muted-foreground">{t("noMonitors")}</TableCell></TableRow>
             )}
           </TableBody>
         </Table>
 
         <div className="flex flex-wrap items-center gap-2">
-          <Input className="w-36" placeholder="name" value={form.name ?? ""} onChange={(e) => setForm({ ...form, name: e.target.value })} />
-          <Input className="w-52" placeholder="target (ip / host[:port])" value={form.target ?? ""} onChange={(e) => setForm({ ...form, target: e.target.value })} />
+          <Input className="w-36" placeholder={t("phName")} value={form.name ?? ""} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+          <Input className="w-52" placeholder={t("phTarget")} value={form.target ?? ""} onChange={(e) => setForm({ ...form, target: e.target.value })} />
           <Select className="w-24" value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value as PingType })}>
             <option value="tcp">TCP</option><option value="icmp">ICMP</option>
           </Select>
           <Input className="w-20" type="number" placeholder="60" value={form.intervalSeconds ?? ""} onChange={(e) => setForm({ ...form, intervalSeconds: Number(e.target.value) })} />
-          <Input className="w-56" placeholder="servers (blank = all)" value={(form.nodeIds as unknown as string) ?? ""} onChange={(e) => setForm({ ...form, nodeIds: e.target.value as unknown as string[] })} />
-          <Button onClick={submit}>Add</Button>
+          <Input className="w-56" placeholder={t("phServersBlank")} value={(form.nodeIds as unknown as string) ?? ""} onChange={(e) => setForm({ ...form, nodeIds: e.target.value as unknown as string[] })} />
+          <Button onClick={submit}>{t("add")}</Button>
         </div>
-        {nodeIds.length > 0 && <p className="text-xs text-muted-foreground">known: {nodeIds.join(", ")}</p>}
+        {nodeIds.length > 0 && <p className="text-xs text-muted-foreground">{t("known")}{nodeIds.join(", ")}</p>}
         {msg && <p className="text-sm text-destructive">{msg}</p>}
       </CardContent>
     </Card>

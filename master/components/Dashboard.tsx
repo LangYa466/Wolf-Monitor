@@ -1,18 +1,21 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import type { NodeView } from "@/lib/types";
-import { ago, bps, bytes, flagUrl, osBadge, pct, uptime } from "@/lib/format";
-import { Card, CardContent } from "@/components/ui/card";
-import { Progress } from "@/components/ui/progress";
-import { Select } from "@/components/ui/select";
-import { Badge } from "@/components/ui/badge";
+import { datetime, flagUrl, ibytes, pct, speed, uptime } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import { useI18n } from "@/lib/i18n";
+import { LayoutGrid, List, ArrowUp, ArrowDown, LayoutDashboard, Radar, AlertTriangle } from "lucide-react";
 
 const POLL_MS = 3000;
 const SORT_KEY = "wolf_sort";
+const VIEW_KEY = "wolf_view";
+const REGION_KEY = "wolf_region";
 
 type SortMode = "custom" | "name" | "cpu" | "mem" | "country" | "status";
+type ViewMode = "grid" | "list";
+type Region = "all" | "cn" | "oversea";
 
 export default function Dashboard({
   initial,
@@ -23,18 +26,25 @@ export default function Dashboard({
   dbError: string | null;
   isPublic?: boolean;
 }) {
+  const { t } = useI18n();
   const [nodes, setNodes] = useState<NodeView[]>(initial);
   const [error, setError] = useState<string | null>(dbError);
   const [sort, setSort] = useState<SortMode>("custom");
-  const [, force] = useState(0);
+  const [view, setView] = useState<ViewMode>("grid");
+  const [region, setRegion] = useState<Region>("all");
+  const [now, setNow] = useState<number>(() => initial.length ? initial[0].lastSeen : 0);
 
+  // Live updates + 1s clock tick.
   useEffect(() => {
     setSort((localStorage.getItem(SORT_KEY) as SortMode) || "custom");
+    setView((localStorage.getItem(VIEW_KEY) as ViewMode) || "grid");
+    setRegion((localStorage.getItem(REGION_KEY) as Region) || "all");
+    setNow(Date.now());
+
     let alive = true;
     async function poll() {
       try {
         const res = await fetch("/api/nodes", { cache: "no-store" });
-        // Public access was revoked (e.g. admin turned it off) → go sign in.
         if (res.status === 401) {
           location.href = "/login";
           return;
@@ -50,90 +60,354 @@ export default function Dashboard({
       }
     }
     const pollTimer = setInterval(poll, POLL_MS);
-    const tickTimer = setInterval(() => alive && force((n) => n + 1), 1000);
+    const clockTimer = setInterval(() => alive && setNow(Date.now()), 1000);
     poll();
     return () => {
       alive = false;
       clearInterval(pollTimer);
-      clearInterval(tickTimer);
+      clearInterval(clockTimer);
     };
   }, []);
 
-  function changeSort(v: SortMode) {
-    setSort(v);
-    localStorage.setItem(SORT_KEY, v);
+  function persist<T extends string>(setter: (v: T) => void, key: string, v: T) {
+    setter(v);
+    localStorage.setItem(key, v);
   }
 
-  const sorted = useMemo(() => sortNodes(nodes, sort), [nodes, sort]);
   const online = nodes.filter((n) => n.online).length;
+  const offline = nodes.length - online;
+
+  // Aggregate traffic for the avatar card.
+  const totals = useMemo(() => {
+    let up = 0,
+      down = 0,
+      upSpeed = 0,
+      downSpeed = 0;
+    for (const n of nodes) {
+      up += n.metrics.netSent || 0;
+      down += n.metrics.netRecv || 0;
+      if (n.online) {
+        upSpeed += n.metrics.netUpSpeed || 0;
+        downSpeed += n.metrics.netDownSpeed || 0;
+      }
+    }
+    return { up, down, upSpeed, downSpeed };
+  }, [nodes]);
+
+  const filtered = useMemo(() => {
+    let arr = nodes;
+    if (region === "cn") arr = arr.filter((n) => n.country === "cn");
+    else if (region === "oversea") arr = arr.filter((n) => n.country && n.country !== "cn");
+    return sortNodes(arr, sort);
+  }, [nodes, sort, region]);
 
   return (
     <div>
-      <header className="mb-6 flex flex-wrap items-center justify-between gap-3">
-        <h1 className="flex items-center gap-2 text-xl font-semibold tracking-tight">
-          Servers <span className="font-normal text-muted-foreground">/ live</span>
-          {isPublic && (
-            <Badge variant="muted" className="font-normal" title="访客视图 · 已隐藏 IP 等敏感信息">
-              public view · IP hidden
-            </Badge>
-          )}
-        </h1>
-        <div className="flex items-center gap-4 text-sm text-muted-foreground tnum">
-          <span className="flex items-center gap-1.5">
-            <span className="h-1.5 w-1.5 animate-[pulse_1.6s_ease-in-out_infinite] rounded-full bg-success" />
-            live
-          </span>
-          <span>
-            <b className="text-foreground">{online}</b> online
-          </span>
-          <span>
-            <b className="text-foreground">{nodes.length}</b> total
-          </span>
-          <Select
-            aria-label="sort"
-            className="h-8 w-32"
-            value={sort}
-            onChange={(e) => changeSort(e.target.value as SortMode)}
-          >
-            <option value="custom">Sort: Custom</option>
-            <option value="name">Sort: Name</option>
-            <option value="cpu">Sort: CPU</option>
-            <option value="mem">Sort: Memory</option>
-            <option value="country">Sort: Country</option>
-            <option value="status">Sort: Status</option>
-          </Select>
-        </div>
-      </header>
-
-      {error && (
-        <Card className="mb-4 border-destructive/60">
-          <CardContent className="p-4 text-sm text-destructive">⚠️ {error}</CardContent>
-        </Card>
-      )}
-
-      {nodes.length === 0 ? (
-        <div className="py-20 text-center text-muted-foreground">
-          <p className="mb-2">No nodes reporting yet.</p>
-          <p className="text-sm">
-            Start a node pointing at this master:
-            <br />
-            <code className="mt-2 inline-block rounded bg-muted px-2 py-1 text-primary">
-              ./wolf-node -e {hostHint()} -t YOUR_TOKEN
-            </code>
+      {/* ── Header: 概览 + live clock, avatar / traffic card ───────────────── */}
+      <div className="mb-6 flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <h1 className="flex items-center gap-2 text-2xl font-bold tracking-tight">
+            <LayoutDashboard className="size-6 text-primary" /> {t("overview")}
+            {isPublic && (
+              <span
+                className="rounded-full bg-muted px-2 py-0.5 text-xs font-normal text-muted-foreground"
+                title={t("publicTitle")}
+              >
+                {t("publicBadge")}
+              </span>
+            )}
+          </h1>
+          <p className="mt-1 text-sm text-muted-foreground tnum">
+            {t("currentTime")} <span className="text-foreground">{now ? clock(now) : "—"}</span>
           </p>
         </div>
+
+        <div className="flex items-center gap-3 rounded-md border border-border bg-card px-4 py-3">
+          <div className="grid grid-cols-2 gap-x-5 gap-y-1 text-xs tnum">
+            <Traffic dir="up" label={t("totalUp")} value={ibytes(totals.up)} />
+            <Traffic dir="down" label={t("totalDown")} value={ibytes(totals.down)} />
+            <Traffic dir="up" label={t("upRate")} value={speed(totals.upSpeed)} live />
+            <Traffic dir="down" label={t("downRate")} value={speed(totals.downSpeed)} live />
+          </div>
+          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-primary/30 to-primary/5">
+            <Radar className="size-6 text-primary" />
+          </div>
+        </div>
+      </div>
+
+      {/* ── Summary cards ──────────────────────────────────────────────────── */}
+      <div className="mb-5 grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <SummaryCard label={t("totalServers")} value={nodes.length} dot="bg-primary" />
+        <SummaryCard label={t("onlineServers")} value={online} dot="bg-success" />
+        <SummaryCard label={t("offlineServers")} value={offline} dot={offline ? "bg-destructive" : "bg-muted-foreground"} />
+      </div>
+
+      {/* ── Filter bar ─────────────────────────────────────────────────────── */}
+      <div className="mb-4 flex flex-wrap items-center gap-2">
+        <div className="flex items-center rounded-md border border-border p-0.5">
+          <ViewToggle active={view === "grid"} onClick={() => persist(setView, VIEW_KEY, "grid")} label={t("viewGrid")}>
+            <LayoutGrid />
+          </ViewToggle>
+          <ViewToggle active={view === "list"} onClick={() => persist(setView, VIEW_KEY, "list")} label={t("viewList")}>
+            <List />
+          </ViewToggle>
+        </div>
+
+        <div className="flex items-center gap-1">
+          {(
+            [
+              ["all", t("regAll")],
+              ["cn", t("regCN")],
+              ["oversea", t("regOversea")],
+            ] as [Region, string][]
+          ).map(([r, label]) => (
+            <button
+              key={r}
+              onClick={() => persist(setRegion, REGION_KEY, r)}
+              className={cn(
+                "rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
+                region === r
+                  ? "bg-secondary text-foreground"
+                  : "text-muted-foreground hover:bg-secondary/60 hover:text-foreground",
+              )}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
+        <div className="flex-1" />
+
+        <div className="relative">
+          <select
+            aria-label={t("sort")}
+            value={sort}
+            onChange={(e) => persist(setSort, SORT_KEY, e.target.value as SortMode)}
+            className="h-8 rounded-md border border-border bg-card px-2.5 text-sm text-foreground outline-none focus:border-primary"
+          >
+            <option value="custom">{t("sortDefault")}</option>
+            <option value="name">{t("sortName")}</option>
+            <option value="cpu">{t("sortCpu")}</option>
+            <option value="mem">{t("sortMem")}</option>
+            <option value="country">{t("sortCountry")}</option>
+            <option value="status">{t("sortStatus")}</option>
+          </select>
+        </div>
+      </div>
+
+      {error && (
+        <div className="mb-4 flex items-center gap-2 rounded-md border border-destructive/60 bg-destructive/10 p-3 text-sm text-destructive">
+          <AlertTriangle className="size-4 shrink-0" /> {error}
+        </div>
+      )}
+
+      {filtered.length === 0 ? (
+        <div className="py-20 text-center text-muted-foreground">
+          {nodes.length === 0 ? (
+            <>
+              <p className="mb-2">{t("noNodes")}</p>
+              <p className="text-sm">
+                {t("startNodeHint")}
+                <br />
+                <code className="mt-2 inline-block rounded bg-muted px-2 py-1 text-primary">
+                  ./wolf-node -e {hostHint()} -t YOUR_TOKEN
+                </code>
+              </p>
+            </>
+          ) : (
+            <p>{t("noNodesInCategory")}</p>
+          )}
+        </div>
+      ) : view === "grid" ? (
+        <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+          {filtered.map((n) => (
+            <ServerRow key={n.id} node={n} />
+          ))}
+        </div>
       ) : (
-        <div className="grid grid-cols-[repeat(auto-fill,minmax(330px,1fr))] gap-4">
-          {sorted.map((n) => (
-            <NodeCard key={n.id} node={n} />
+        <div className="overflow-hidden rounded-md border border-border">
+          {filtered.map((n, i) => (
+            <ServerListRow key={n.id} node={n} first={i === 0} />
           ))}
         </div>
       )}
 
       <footer className="mt-10 text-center text-xs text-muted-foreground">
-        Wolf-Monitor · polling every {POLL_MS / 1000}s
+        Wolf-Monitor · {t("updatedEvery", { n: POLL_MS / 1000 })}
       </footer>
     </div>
+  );
+}
+
+// ── pieces ─────────────────────────────────────────────────────────────────
+
+function clock(ms: number): string {
+  return datetime(ms).slice(11); // HH:MM:SS
+}
+
+function Traffic({
+  dir,
+  label,
+  value,
+  live = false,
+}: {
+  dir: "up" | "down";
+  label: string;
+  value: string;
+  live?: boolean;
+}) {
+  const Arrow = dir === "up" ? ArrowUp : ArrowDown;
+  return (
+    <div className="flex items-center gap-1.5">
+      <Arrow className={cn("size-3", dir === "up" ? "text-primary" : "text-success")} />
+      <span className="text-muted-foreground">{label}</span>
+      <span className={cn("ml-auto font-semibold", live && "text-foreground")}>{value}</span>
+    </div>
+  );
+}
+
+function SummaryCard({ label, value, dot }: { label: string; value: number; dot: string }) {
+  return (
+    <div className="flex items-center justify-between rounded-md border border-border bg-card px-4 py-3.5">
+      <span className="flex items-center gap-2 text-sm text-muted-foreground">
+        <span className={cn("h-2 w-2 rounded-full", dot)} />
+        {label}
+      </span>
+      <span className="text-2xl font-bold tnum">{value}</span>
+    </div>
+  );
+}
+
+function ViewToggle({
+  active,
+  onClick,
+  label,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  label: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      aria-label={label}
+      title={label}
+      className={cn(
+        "inline-flex h-7 w-7 items-center justify-center rounded transition-colors [&_svg]:size-4",
+        active ? "bg-secondary text-foreground" : "text-muted-foreground hover:text-foreground",
+      )}
+    >
+      {children}
+    </button>
+  );
+}
+
+function StatusDot({ online }: { online: boolean }) {
+  return (
+    <span
+      className={cn(
+        "h-2.5 w-2.5 shrink-0 rounded-full",
+        online
+          ? "bg-success shadow-[0_0_0_3px_hsl(var(--success)/0.15)]"
+          : "bg-destructive shadow-[0_0_0_3px_hsl(var(--destructive)/0.12)]",
+      )}
+    />
+  );
+}
+
+function Flag({ cc }: { cc: string | null }) {
+  if (!cc) return null;
+  return (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src={flagUrl(cc)}
+      alt={cc}
+      title={cc.toUpperCase()}
+      width={20}
+      height={15}
+      className="shrink-0 rounded-[2px]"
+    />
+  );
+}
+
+function pctColor(p: number): string {
+  if (p >= 90) return "text-destructive";
+  if (p >= 70) return "text-warning";
+  return "text-foreground";
+}
+
+// Compact metric cell: tiny label above a value.
+function Cell({ label, value, className }: { label: string; value: string; className?: string }) {
+  return (
+    <div className="min-w-0 text-center">
+      <div className="text-[10px] uppercase tracking-wide text-muted-foreground">{label}</div>
+      <div className={cn("truncate text-[13px] font-semibold tnum", className)}>{value}</div>
+    </div>
+  );
+}
+
+// Grid-view card: one server as a horizontal row of identity + 5 metric cells.
+function ServerRow({ node }: { node: NodeView }) {
+  const { t } = useI18n();
+  const { host, metrics: m } = node;
+  return (
+    <Link
+      href={`/server/${encodeURIComponent(node.id)}`}
+      className="flex items-center gap-3 rounded-md border border-border bg-card px-4 py-3 transition-colors hover:border-muted-foreground/40"
+    >
+      <StatusDot online={node.online} />
+      <Flag cc={node.country} />
+      <div className="min-w-0 flex-1">
+        <div className="truncate text-[15px] font-semibold" title={host.hostname}>
+          {host.hostname}
+        </div>
+        <div className="truncate text-[11px] text-muted-foreground">
+          {host.arch}
+          {node.country ? ` · ${node.country.toUpperCase()}` : ""}
+          {node.online ? ` · ${uptime(m.uptime)}` : ` · ${t("offline")}`}
+        </div>
+      </div>
+      <div className="grid shrink-0 grid-cols-5 gap-x-3 sm:gap-x-4">
+        <Cell label={t("mCpu")} value={pct(m.cpuUsage)} className={pctColor(m.cpuUsage)} />
+        <Cell label={t("mMem")} value={pct(m.memPercent)} className={pctColor(m.memPercent)} />
+        <Cell label={t("mStorage")} value={pct(m.diskPercent)} className={pctColor(m.diskPercent)} />
+        <Cell label={t("mUp")} value={speed(m.netUpSpeed)} />
+        <Cell label={t("mDown")} value={speed(m.netDownSpeed)} />
+      </div>
+    </Link>
+  );
+}
+
+// List-view row: denser single-line layout for many servers.
+function ServerListRow({ node, first }: { node: NodeView; first: boolean }) {
+  const { t } = useI18n();
+  const { host, metrics: m } = node;
+  return (
+    <Link
+      href={`/server/${encodeURIComponent(node.id)}`}
+      className={cn(
+        "flex items-center gap-3 bg-card px-4 py-2.5 transition-colors hover:bg-secondary/40",
+        !first && "border-t border-border",
+      )}
+    >
+      <StatusDot online={node.online} />
+      <Flag cc={node.country} />
+      <span className="w-40 shrink-0 truncate text-[14px] font-medium" title={host.hostname}>
+        {host.hostname}
+      </span>
+      <span className="hidden w-24 shrink-0 truncate text-xs text-muted-foreground sm:inline">
+        {host.arch}
+      </span>
+      <div className="flex flex-1 justify-end gap-x-4 sm:gap-x-6">
+        <Cell label={t("mCpu")} value={pct(m.cpuUsage)} className={pctColor(m.cpuUsage)} />
+        <Cell label={t("mMem")} value={pct(m.memPercent)} className={pctColor(m.memPercent)} />
+        <Cell label={t("mStorage")} value={pct(m.diskPercent)} className={pctColor(m.diskPercent)} />
+        <Cell label={t("mUp")} value={speed(m.netUpSpeed)} />
+        <Cell label={t("mDown")} value={speed(m.netDownSpeed)} />
+      </div>
+    </Link>
   );
 }
 
@@ -159,105 +433,4 @@ function hostHint(): string {
   if (typeof window === "undefined") return "wss://your-master";
   const proto = window.location.protocol === "https:" ? "wss" : "ws";
   return `${proto}://${window.location.host}`;
-}
-
-function barColor(p: number): string {
-  if (p >= 90) return "bg-destructive";
-  if (p >= 70) return "bg-warning";
-  return "bg-primary";
-}
-
-function Metric({ label, value, percent }: { label: string; value: string; percent: number }) {
-  return (
-    <div className="mb-3">
-      <div className="mb-1.5 flex justify-between text-[12.5px] tnum">
-        <span className="text-muted-foreground">{label}</span>
-        <span className="font-semibold">{value}</span>
-      </div>
-      <Progress value={percent} indicatorClassName={barColor(percent)} />
-    </div>
-  );
-}
-
-function Stat({ k, v }: { k: string; v: string }) {
-  return (
-    <div className="flex justify-between gap-2 tnum">
-      <span className="text-muted-foreground">{k}</span>
-      <span className="font-semibold">{v}</span>
-    </div>
-  );
-}
-
-function NodeCard({ node }: { node: NodeView }) {
-  const { host, metrics: m } = node;
-  return (
-    <Card className="transition-colors hover:border-muted-foreground/30">
-      <CardContent className="p-4">
-        <div className="mb-1 flex items-center justify-between gap-2">
-          <div className="flex min-w-0 items-center gap-2 font-semibold">
-            <span
-              className={cn(
-                "h-2.5 w-2.5 shrink-0 rounded-full",
-                node.online
-                  ? "bg-success shadow-[0_0_0_3px_hsl(var(--success)/0.15)]"
-                  : "bg-destructive shadow-[0_0_0_3px_hsl(var(--destructive)/0.12)]",
-              )}
-            />
-            {node.country && (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={flagUrl(node.country)}
-                alt={node.country}
-                title={node.country.toUpperCase()}
-                width={20}
-                height={15}
-                className="shrink-0 rounded-[2px]"
-              />
-            )}
-            <span className="truncate" title={host.hostname}>
-              {host.hostname}
-            </span>
-          </div>
-          <span className="shrink-0 text-xs text-muted-foreground">
-            {node.online ? uptime(m.uptime) : ago(node.lastSeen)}
-          </span>
-        </div>
-
-        <div className="mb-3.5 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
-          <span>{osBadge(host.os)}</span>
-          <span className="opacity-40">·</span>
-          <span>{host.arch}</span>
-          <span className="opacity-40">·</span>
-          <span title={host.cpuModel}>{host.cpuCores} cores</span>
-          {node.country && (
-            <>
-              <span className="opacity-40">·</span>
-              <span className="uppercase">{node.country}</span>
-            </>
-          )}
-        </div>
-
-        <Metric label="CPU" value={pct(m.cpuUsage)} percent={m.cpuUsage} />
-        <Metric
-          label="Memory"
-          value={`${bytes(m.memUsed)} / ${bytes(host.memTotal)}`}
-          percent={m.memPercent}
-        />
-        <Metric
-          label="Disk"
-          value={`${bytes(m.diskUsed)} / ${bytes(host.diskTotal)}`}
-          percent={m.diskPercent}
-        />
-
-        <div className="mt-3.5 grid grid-cols-2 gap-x-4 gap-y-2 border-t border-border pt-3.5 text-[12.5px]">
-          <Stat k="↑ net" v={bps(m.netUpSpeed)} />
-          <Stat k="↓ net" v={bps(m.netDownSpeed)} />
-          <Stat k="disk R" v={bps(m.diskReadSpeed)} />
-          <Stat k="disk W" v={bps(m.diskWriteSpeed)} />
-          <Stat k="load" v={m.load1.toFixed(2)} />
-          <Stat k="TCP / proc" v={`${m.tcpConns} / ${m.procs}`} />
-        </div>
-      </CardContent>
-    </Card>
-  );
 }

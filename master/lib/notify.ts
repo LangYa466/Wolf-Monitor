@@ -6,7 +6,7 @@
 //   NOTIFY_WEBHOOK_URL                            -> generic JSON webhook
 //
 // The template understands these placeholders (Komari-compatible):
-//   {{emoji}}  -> the level emoji   {{event}}  -> event name
+//   {{emoji}}  -> the level tag     {{event}}  -> event name
 //   {{client}} -> server / node id  {{message}}-> details   {{time}} -> timestamp
 
 import { getSetting } from "./db";
@@ -14,15 +14,16 @@ import type { NotifyConfig } from "./types";
 
 export type NotifyLevel = "alert" | "recovery" | "offline" | "online";
 
+// Plain-text level tags (no emoji) substituted into the {{emoji}} placeholder.
 const LEVEL_EMOJI: Record<NotifyLevel, string> = {
-  alert: "🔴",
-  recovery: "🟢",
-  offline: "⚫",
-  online: "🟢",
+  alert: "[ALERT]",
+  recovery: "[RECOVERED]",
+  offline: "[OFFLINE]",
+  online: "[ONLINE]",
 };
 
 export const DEFAULT_TEMPLATE =
-  "{{emoji}}{{emoji}}{{emoji}}\n" +
+  "{{emoji}}\n" +
   "Event: {{event}}\n" +
   "Clients: {{client}}\n" +
   "Message: {{message}}\n" +
