@@ -111,8 +111,12 @@ export interface NotifyConfig {
 }
 
 // What the dashboard consumes: static host info + the latest sample + liveness.
+// Note: the auto-increment `seq` is never exposed here — only its encrypted
+// `opaqueId` (used in URLs). `name` is an optional admin-set display name.
 export interface NodeView {
-  id: string; // hostname
+  id: string; // hostname (internal identity, used for history/admin ops)
+  opaqueId: string; // format-preserving-encrypted seq — the URL id
+  name: string | null; // admin display name (falls back to hostname)
   host: HostInfo;
   metrics: Metrics;
   lastSeen: number; // unix millis (server time)

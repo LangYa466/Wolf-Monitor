@@ -20,7 +20,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { Select } from "@/components/ui/select";
+import { SelectMenu } from "@/components/ui/select-menu";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
@@ -34,7 +34,7 @@ import {
 } from "@/components/ui/table";
 import { flagUrl } from "@/lib/format";
 import { useI18n } from "@/lib/i18n";
-import { GripVertical, Trash2, RotateCw, Check, Minus } from "lucide-react";
+import { GripVertical, Trash2, RotateCw, Check, Minus, AlertTriangle } from "lucide-react";
 
 // Renders a node's on/off state as an icon (no emoji).
 function OnOff({ on }: { on: boolean }) {
@@ -108,9 +108,15 @@ function ServersSection({ nodes }: { nodes: NodeView[] }) {
   const [publicDashboard, setPublicDashboard] = useState(false);
   const [order, setOrder] = useState<NodeView[]>(nodes);
   const [dragId, setDragId] = useState<string | null>(null);
+  const [names, setNames] = useState<Record<string, string>>({});
+  const [cipherKey, setCipherKey] = useState("");
+  const [cipherTweak, setCipherTweak] = useState("");
   const [msg, setMsg] = useState("");
 
   useEffect(() => setOrder(nodes), [nodes]);
+  useEffect(() => {
+    setNames(Object.fromEntries(nodes.map((n) => [n.id, n.name ?? ""])));
+  }, [nodes]);
   useEffect(() => {
     fetch("/api/settings")
       .then((r) => (r.ok ? r.json() : Promise.reject()))
@@ -118,9 +124,30 @@ function ServersSection({ nodes }: { nodes: NodeView[] }) {
         setNodeToken(d.nodeToken ?? "");
         setIpinfoToken(d.ipinfoToken ?? "");
         setPublicDashboard(d.publicDashboard === true);
+        setCipherKey(d.idCipherKey ?? "");
+        setCipherTweak(d.idCipherTweak ?? "");
       })
       .catch(() => {});
   }, []);
+
+  async function saveName(id: string) {
+    const res = await api(`/api/nodes/${encodeURIComponent(id)}`, "PATCH", {
+      name: names[id] ?? "",
+    });
+    setMsg(res.ok ? t("msgSaved") : t("msgFailed"));
+  }
+
+  async function saveCipher(payload: { idCipherKey?: string; idCipherTweak?: string } | { rotateIdCipher: true }) {
+    const res = await api("/api/settings", "POST", payload);
+    if (res.ok) {
+      const d = await res.json();
+      setCipherKey(d.idCipherKey ?? "");
+      setCipherTweak(d.idCipherTweak ?? "");
+      setMsg(t("msgSaved"));
+    } else {
+      setMsg(t("msgFailed"));
+    }
+  }
 
   async function togglePublic(v: boolean) {
     setPublicDashboard(v); // optimistic
@@ -215,28 +242,77 @@ function ServersSection({ nodes }: { nodes: NodeView[] }) {
         </Field>
 
         <div>
-          <Label>{t("customOrder")}</Label>
+          <Label>{t("customOrder")} · {t("nodeName")}</Label>
           <div className="mt-2 space-y-1.5">
             {order.length === 0 && <p className="text-sm text-muted-foreground">{t("noServersYet")}</p>}
             {order.map((n) => (
               <div
                 key={n.id}
-                draggable
-                onDragStart={() => setDragId(n.id)}
                 onDragOver={(e) => e.preventDefault()}
                 onDrop={() => onDrop(n.id)}
-                className="flex cursor-grab items-center gap-2 rounded-md border border-border bg-background px-3 py-2 text-sm active:cursor-grabbing"
+                className="flex items-center gap-2 rounded-md border border-border bg-background px-2 py-1.5 text-sm"
               >
-                <GripVertical className="size-4 text-muted-foreground" />
+                {/* drag handle — only this part starts a drag, so the name input stays usable */}
+                <span
+                  draggable
+                  onDragStart={() => setDragId(n.id)}
+                  className="cursor-grab p-1 text-muted-foreground active:cursor-grabbing"
+                  title={n.host.hostname}
+                >
+                  <GripVertical className="size-4" />
+                </span>
                 {n.country && (
                   // eslint-disable-next-line @next/next/no-img-element
-                  <img src={flagUrl(n.country)} alt={n.country} width={18} height={13} className="rounded-[2px]" />
+                  <img src={flagUrl(n.country)} alt={n.country} width={18} height={13} className="shrink-0 rounded-[2px]" />
                 )}
-                <span className="font-medium">{n.host.hostname}</span>
-                <span className={`ml-auto h-2 w-2 rounded-full ${n.online ? "bg-success" : "bg-destructive"}`} />
+                <Input
+                  value={names[n.id] ?? ""}
+                  placeholder={n.host.hostname}
+                  onChange={(e) => setNames((m) => ({ ...m, [n.id]: e.target.value }))}
+                  onBlur={() => {
+                    if ((names[n.id] ?? "") !== (n.name ?? "")) saveName(n.id);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") e.currentTarget.blur();
+                  }}
+                  className="h-8"
+                />
+                <span className={`ml-1 h-2 w-2 shrink-0 rounded-full ${n.online ? "bg-success" : "bg-destructive"}`} />
               </div>
             ))}
           </div>
+        </div>
+
+        {/* Advanced: opaque server-link id cipher. */}
+        <div className="space-y-2 rounded-md border border-warning/40 bg-warning/5 p-3">
+          <Label className="text-sm text-foreground">{t("secOpaque")}</Label>
+          <p className="flex items-start gap-1.5 text-xs text-muted-foreground">
+            <AlertTriangle className="mt-0.5 size-3.5 shrink-0 text-warning" />
+            {t("opaqueWarn")}
+          </p>
+          <Field label={t("opaqueKey")}>
+            <Input
+              value={cipherKey}
+              onChange={(e) => setCipherKey(e.target.value)}
+              onBlur={() => saveCipher({ idCipherKey: cipherKey })}
+              className="font-mono"
+              spellCheck={false}
+            />
+          </Field>
+          <Field label={t("opaqueTweak")}>
+            <div className="flex gap-2">
+              <Input
+                value={cipherTweak}
+                onChange={(e) => setCipherTweak(e.target.value)}
+                onBlur={() => saveCipher({ idCipherTweak: cipherTweak })}
+                className="font-mono"
+                spellCheck={false}
+              />
+              <Button variant="outline" size="sm" onClick={() => saveCipher({ rotateIdCipher: true })}>
+                {t("regenerate")}
+              </Button>
+            </div>
+          </Field>
         </div>
 
         {msg && <p className="text-sm text-muted-foreground">{msg}</p>}
@@ -404,9 +480,17 @@ function AlertRules({ nodeIds }: { nodeIds: string[] }) {
 
         <div className="flex flex-wrap items-center gap-2">
           <Input className="w-36" placeholder={t("phName")} value={form.name ?? ""} onChange={(e) => setForm({ ...form, name: e.target.value })} />
-          <Select className="w-24" value={form.metric} onChange={(e) => setForm({ ...form, metric: e.target.value as AlertMetric })}>
-            <option value="cpu">CPU</option><option value="ram">RAM</option><option value="disk">DISK</option>
-          </Select>
+          <SelectMenu
+            align="start"
+            ariaLabel={t("thMetric")}
+            value={(form.metric ?? "cpu") as AlertMetric}
+            onChange={(v) => setForm({ ...form, metric: v })}
+            options={[
+              { value: "cpu", label: "CPU" },
+              { value: "ram", label: "RAM" },
+              { value: "disk", label: "DISK" },
+            ]}
+          />
           <Input className="w-20" type="number" placeholder="80" value={form.threshold ?? ""} onChange={(e) => setForm({ ...form, threshold: Number(e.target.value) })} />
           <Input className="w-20" type="number" step="0.05" placeholder="0.8" value={form.ratio ?? ""} onChange={(e) => setForm({ ...form, ratio: Number(e.target.value) })} />
           <Input className="w-20" type="number" placeholder="15" value={form.windowMinutes ?? ""} onChange={(e) => setForm({ ...form, windowMinutes: Number(e.target.value) })} />
@@ -546,9 +630,16 @@ function PingTasks({ nodeIds }: { nodeIds: string[] }) {
         <div className="flex flex-wrap items-center gap-2">
           <Input className="w-36" placeholder={t("phName")} value={form.name ?? ""} onChange={(e) => setForm({ ...form, name: e.target.value })} />
           <Input className="w-52" placeholder={t("phTarget")} value={form.target ?? ""} onChange={(e) => setForm({ ...form, target: e.target.value })} />
-          <Select className="w-24" value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value as PingType })}>
-            <option value="tcp">TCP</option><option value="icmp">ICMP</option>
-          </Select>
+          <SelectMenu
+            align="start"
+            ariaLabel={t("thType")}
+            value={(form.type ?? "tcp") as PingType}
+            onChange={(v) => setForm({ ...form, type: v })}
+            options={[
+              { value: "tcp", label: "TCP" },
+              { value: "icmp", label: "ICMP" },
+            ]}
+          />
           <Input className="w-20" type="number" placeholder="60" value={form.intervalSeconds ?? ""} onChange={(e) => setForm({ ...form, intervalSeconds: Number(e.target.value) })} />
           <Input className="w-56" placeholder={t("phServersBlank")} value={(form.nodeIds as unknown as string) ?? ""} onChange={(e) => setForm({ ...form, nodeIds: e.target.value as unknown as string[] })} />
           <Button onClick={submit}>{t("add")}</Button>

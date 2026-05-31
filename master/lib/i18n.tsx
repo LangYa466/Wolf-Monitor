@@ -162,6 +162,13 @@ const zhHant: Dict = {
   thInterval: "間隔",
   noMonitors: "尚無監測",
   phTarget: "目標（ip / host[:port]）",
+  nodeName: "顯示名稱",
+  secOpaque: "伺服器連結 ID（進階）",
+  opaqueWarn:
+    "此金鑰用於產生伺服器頁面網址中的不透明 ID。除非你清楚其用途，否則不建議更動——變更後既有的伺服器連結會全部失效。",
+  opaqueKey: "加密金鑰 (hex)",
+  opaqueTweak: "Tweak (hex)",
+  regenerate: "重新隨機產生",
 
   // ── admin: latency view ──────────────────────────────────────────
   latTitle: "延遲",
@@ -312,6 +319,13 @@ const en: Dict = {
   thInterval: "Interval",
   noMonitors: "no monitors",
   phTarget: "target (ip / host[:port])",
+  nodeName: "Display name",
+  secOpaque: "Server link ID (advanced)",
+  opaqueWarn:
+    "This key generates the opaque ID used in server page URLs. We don't recommend changing it unless you know what it's for — doing so invalidates all existing server links.",
+  opaqueKey: "Encryption key (hex)",
+  opaqueTweak: "Tweak (hex)",
+  regenerate: "Regenerate randomly",
 
   // ── admin: latency view ──────────────────────────────────────────
   latTitle: "Latency",

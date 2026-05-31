@@ -100,3 +100,38 @@ export function osBadge(os: string): string {
   if (o.includes("linux")) return "Linux";
   return os || "?";
 }
+
+// osDistro resolves the concrete distribution (Ubuntu / Debian / …) from the
+// node's reported `platform`, falling back to the generic OS. `slug` is a
+// simpleicons.org slug for the logo (rendered via their CDN, like the flags),
+// or null when no brand logo is available (Windows/macOS were removed from the
+// set) — callers should show a generic icon instead.
+export function osDistro(
+  platform: string,
+  os: string,
+): { name: string; slug: string | null } {
+  const p = (platform || "").toLowerCase();
+  const o = (os || "").toLowerCase();
+  const table: [RegExp, string, string | null][] = [
+    [/ubuntu/, "Ubuntu", "ubuntu"],
+    [/debian/, "Debian", "debian"],
+    [/cent\s?os/, "CentOS", "centos"],
+    [/fedora/, "Fedora", "fedora"],
+    [/red\s?hat|rhel/, "RHEL", "redhat"],
+    [/rocky/, "Rocky Linux", "rockylinux"],
+    [/alma/, "AlmaLinux", "almalinux"],
+    [/arch/, "Arch Linux", "archlinux"],
+    [/manjaro/, "Manjaro", "manjaro"],
+    [/alpine/, "Alpine", "alpinelinux"],
+    [/(open)?suse/, "openSUSE", "opensuse"],
+    [/mint/, "Linux Mint", "linuxmint"],
+    [/gentoo/, "Gentoo", "gentoo"],
+    [/raspbian|raspberry/, "Raspberry Pi OS", "raspberrypi"],
+  ];
+  for (const [re, name, slug] of table) if (re.test(p)) return { name, slug };
+  if (o.includes("windows") || p.includes("windows")) return { name: "Windows", slug: null };
+  if (o.includes("darwin") || o.includes("mac") || p.includes("darwin"))
+    return { name: "macOS", slug: null };
+  if (o.includes("linux")) return { name: "Linux", slug: "linux" };
+  return { name: platform || os || "Unknown", slug: null };
+}

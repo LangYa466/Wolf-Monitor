@@ -1,5 +1,6 @@
 import { Pool } from "pg";
 import type { HostInfo, Metrics, NodeView, Report } from "./types";
+import { encodeNodeId } from "./opaqueid";
 
 // A node is considered offline if no report arrived within this window.
 export const OFFLINE_AFTER_MS = 15_000;
@@ -168,6 +169,12 @@ ALTER TABLE metrics_history ADD COLUMN IF NOT EXISTS procs     BIGINT NOT NULL D
 ALTER TABLE metrics_history ADD COLUMN IF NOT EXISTS tcp       BIGINT NOT NULL DEFAULT 0;
 ALTER TABLE metrics_history ADD COLUMN IF NOT EXISTS mem_used  BIGINT NOT NULL DEFAULT 0;
 ALTER TABLE metrics_history ADD COLUMN IF NOT EXISTS swap_used BIGINT NOT NULL DEFAULT 0;
+
+-- Stable auto-increment id (hidden behind an encrypted opaque id in URLs) and
+-- an optional admin-set display name. Adding a serial column backfills existing
+-- rows with sequence values automatically.
+ALTER TABLE nodes ADD COLUMN IF NOT EXISTS seq  BIGSERIAL;
+ALTER TABLE nodes ADD COLUMN IF NOT EXISTS name TEXT;
 `;
 
 // Generic key/value settings (notification config, etc.).
@@ -235,7 +242,13 @@ export async function saveReport(
   const ip = opts.ip ?? null;
   const country = opts.country ?? null;
 
-  const { rows } = await pool.query<{ sort_order: number; country: string | null; ip: string | null }>(
+  const { rows } = await pool.query<{
+    sort_order: number;
+    country: string | null;
+    ip: string | null;
+    seq: string;
+    name: string | null;
+  }>(
     `INSERT INTO nodes (id, host, metrics, last_seen, updated_at, ip, country, sort_order)
      VALUES ($1, $2, $3, $4, now(), $5, $6,
              COALESCE((SELECT MAX(sort_order) + 1 FROM nodes), 0))
@@ -246,7 +259,7 @@ export async function saveReport(
            updated_at = now(),
            ip = COALESCE($5, nodes.ip),
            country = COALESCE($6, nodes.country)
-     RETURNING sort_order, country, ip`,
+     RETURNING sort_order, country, ip, seq, name`,
     [id, JSON.stringify(report.host), JSON.stringify(m), now, ip, country]
   );
 
@@ -274,6 +287,8 @@ export async function saveReport(
 
   return {
     id,
+    opaqueId: await encodeNodeId(Number(rows[0]?.seq ?? 0)),
+    name: rows[0]?.name ?? null,
     host: report.host,
     metrics: m,
     lastSeen: now,
@@ -294,22 +309,39 @@ export async function listNodes(): Promise<NodeView[]> {
     ip: string | null;
     country: string | null;
     sort_order: number;
+    seq: string;
+    name: string | null;
   }>(
-    `SELECT id, host, metrics, last_seen, ip, country, sort_order
+    `SELECT id, host, metrics, last_seen, ip, country, sort_order, seq, name
        FROM nodes ORDER BY sort_order ASC, id ASC`
   );
 
   const now = Date.now();
-  return rows.map((r) => ({
-    id: r.id,
-    host: r.host,
-    metrics: r.metrics,
-    lastSeen: Number(r.last_seen),
-    online: now - Number(r.last_seen) < OFFLINE_AFTER_MS,
-    ip: r.ip,
-    country: r.country ? r.country.toLowerCase() : null,
-    sortOrder: r.sort_order,
-  }));
+  return Promise.all(
+    rows.map(async (r) => ({
+      id: r.id,
+      opaqueId: await encodeNodeId(Number(r.seq ?? 0)),
+      name: r.name ?? null,
+      host: r.host,
+      metrics: r.metrics,
+      lastSeen: Number(r.last_seen),
+      online: now - Number(r.last_seen) < OFFLINE_AFTER_MS,
+      ip: r.ip,
+      country: r.country ? r.country.toLowerCase() : null,
+      sortOrder: r.sort_order,
+    }))
+  );
+}
+
+// setNodeName updates a node's display name (empty string clears it). Keyed by
+// the internal hostname id.
+export async function setNodeName(id: string, name: string): Promise<void> {
+  await ensureSchema();
+  const trimmed = name.trim();
+  await getPool().query(`UPDATE nodes SET name = $1 WHERE id = $2`, [
+    trimmed || null,
+    id,
+  ]);
 }
 
 // getNodeNet returns a node's stored ip/country (or null if unknown), so the

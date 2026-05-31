@@ -8,7 +8,7 @@ import {
   datetime,
   flagUrl,
   ibytes,
-  osBadge,
+  osDistro,
   pct,
   speed,
   uptime,
@@ -17,7 +17,10 @@ import {
 import { cn } from "@/lib/utils";
 import { MetricChart } from "@/components/Charts";
 import { useI18n } from "@/lib/i18n";
-import { ChevronLeft, ArrowUp, ArrowDown, LayoutDashboard, Radar, AlertTriangle } from "lucide-react";
+import { ChevronLeft, ArrowUp, ArrowDown, LayoutDashboard, Radar, AlertTriangle, Monitor, Clock } from "lucide-react";
+import { SegmentedControl } from "@/components/ui/segmented";
+import { SelectMenu } from "@/components/ui/select-menu";
+import type { HostInfo } from "@/lib/types";
 
 const POLL_MS = 3000;
 
@@ -73,7 +76,7 @@ export default function ServerDetail({
         }
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
-        const found = (data.nodes as NodeView[]).find((n) => n.id === id) ?? null;
+        const found = (data.nodes as NodeView[]).find((n) => n.opaqueId === id) ?? null;
         if (alive) {
           if (found) setNode(found);
           setError(null);
@@ -92,12 +95,15 @@ export default function ServerDetail({
     };
   }, [id]);
 
+  // History is keyed by the internal hostname id, not the opaque URL id.
+  const histId = node?.id ?? initial?.id ?? null;
   const loadHistory = useCallback(async () => {
+    if (!histId) return;
     const r = RANGES.find((x) => x.key === range)!;
     const qs =
       r.windowMs > 0 ? `?window=${r.windowMs}&limit=2000` : `?limit=120`;
     try {
-      const res = await fetch(`/api/nodes/${encodeURIComponent(id)}/history${qs}`, {
+      const res = await fetch(`/api/nodes/${encodeURIComponent(histId)}/history${qs}`, {
         cache: "no-store",
       });
       if (!res.ok) return;
@@ -106,7 +112,7 @@ export default function ServerDetail({
     } catch {
       /* keep previous */
     }
-  }, [id, range]);
+  }, [histId, range]);
 
   // Refetch on range change; for RealTime keep polling live.
   useEffect(() => {
@@ -140,6 +146,8 @@ export default function ServerDetail({
   const swapPct = host.swapTotal > 0 ? (m.swapUsed / host.swapTotal) * 100 : 0;
 
   // Series derived from history.
+  const ts = points.map((p) => p.ts);
+  const procFmt = (v: number) => String(Math.round(v));
   const cpu = points.map((p) => p.cpu);
   const procs = points.map((p) => p.procs);
   const disk = points.map((p) => p.diskPct);
@@ -160,10 +168,11 @@ export default function ServerDetail({
       id="c-cpu"
       title="CPU"
       legend={<span>{pct(m.cpuUsage)}</span>}
-      series={[{ data: cpu, color: C.blue }]}
+      series={[{ data: cpu, color: C.blue, name: "CPU", format: pct }]}
       max={100}
       yLabels={["100%", "50%", "0%"]}
       xLeft={xLabel}
+      timestamps={ts}
     />
   );
   const procChart = (
@@ -171,10 +180,11 @@ export default function ServerDetail({
       id="c-proc"
       title={t("chProcesses")}
       legend={<span className="text-foreground">{m.procs}</span>}
-      series={[{ data: procs, color: C.maroon, area: true }]}
+      series={[{ data: procs, color: C.maroon, area: true, name: t("chProcesses"), format: procFmt }]}
       max={procsMax}
       yLabels={[String(procsMax), String(Math.round(procsMax / 2)), "0"]}
       xLeft={xLabel}
+      timestamps={ts}
     />
   );
   const diskChart = (
@@ -188,10 +198,11 @@ export default function ServerDetail({
           {ibytes(m.diskUsed)} / {ibytes(host.diskTotal)}
         </span>
       }
-      series={[{ data: disk, color: C.green, area: true }]}
+      series={[{ data: disk, color: C.green, area: true, name: t("chDisk"), format: pct }]}
       max={100}
       yLabels={["100%", "50%", "0%"]}
       xLeft={xLabel}
+      timestamps={ts}
     />
   );
   const memChart = (
@@ -210,12 +221,13 @@ export default function ServerDetail({
         </span>
       }
       series={[
-        { data: mem, color: C.purple, area: true },
-        { data: swap, color: C.cyan },
+        { data: mem, color: C.purple, area: true, name: t("memory"), format: pct },
+        { data: swap, color: C.cyan, name: "Swap", format: pct },
       ]}
       max={100}
       yLabels={["100%", "50%", "0%"]}
       xLeft={xLabel}
+      timestamps={ts}
     />
   );
   const netChart = (
@@ -235,12 +247,13 @@ export default function ServerDetail({
         </span>
       }
       series={[
-        { data: netUp, color: C.blue },
-        { data: netDown, color: C.green },
+        { data: netUp, color: C.blue, name: t("mUp"), format: speed },
+        { data: netDown, color: C.green, name: t("mDown"), format: speed },
       ]}
       max={netMax}
       yLabels={[speed(netMax), speed(netMax / 2), "0"]}
       xLeft={xLabel}
+      timestamps={ts}
     />
   );
   const tcpChart = (
@@ -248,10 +261,11 @@ export default function ServerDetail({
       id="c-tcp"
       title={t("chTcp")}
       legend={<span className="text-foreground">{m.tcpConns}</span>}
-      series={[{ data: tcp, color: C.cyan, area: true }]}
+      series={[{ data: tcp, color: C.cyan, area: true, name: "TCP", format: procFmt }]}
       max={tcpMax}
       yLabels={[String(tcpMax), String(Math.round(tcpMax / 2)), "0"]}
       xLeft={xLabel}
+      timestamps={ts}
     />
   );
 
@@ -288,7 +302,9 @@ export default function ServerDetail({
                 className="rounded-[2px]"
               />
             )}
-            <span className="truncate">{host.hostname}</span>
+            <span className="truncate" title={host.hostname}>
+              {node.name?.trim() || host.hostname}
+            </span>
           </h1>
 
           <dl className="grid grid-cols-2 gap-x-6 gap-y-3 text-sm sm:grid-cols-3 lg:grid-cols-6">
@@ -311,12 +327,23 @@ export default function ServerDetail({
             <Field label={t("memory")}>{ibytes(host.memTotal)}</Field>
             <Field label={t("disk")}>{ibytes(host.diskTotal)}</Field>
             <Field label={t("region")}>
-              {node.country ? node.country.toUpperCase() : "—"}
+              {node.country ? (
+                <span className="flex h-4 items-center pl-[2px]">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    alt={node.country.toUpperCase()}
+                    loading="lazy"
+                    className="inline-block h-[1em] w-auto rounded-[1px] object-cover"
+                    src={`https://flagcdn.com/${node.country}.svg`}
+                  />
+                </span>
+              ) : (
+                "—"
+              )}
             </Field>
 
             <Field label={t("system")} className="col-span-2 sm:col-span-2 lg:col-span-3">
-              {osBadge(host.os)}
-              {host.platformVersion ? ` ${host.platformVersion}` : ""}
+              <OsBadge host={host} />
             </Field>
             <Field label={t("cpu")} className="col-span-2 sm:col-span-1 lg:col-span-3">
               <span title={host.cpuModel}>
@@ -351,32 +378,27 @@ export default function ServerDetail({
 
       {/* tabs */}
       <div className="mb-4 flex justify-center">
-        <div className="inline-flex rounded-md border border-border p-0.5">
-          <TabBtn active={tab === "detail"} onClick={() => setTab("detail")}>
-            {t("tabDetail")}
-          </TabBtn>
-          <TabBtn active={tab === "network"} onClick={() => setTab("network")}>
-            {t("tabNetwork")}
-          </TabBtn>
-        </div>
+        <SegmentedControl
+          variant="card"
+          value={tab}
+          onChange={setTab}
+          options={[
+            { value: "detail", label: t("tabDetail") },
+            { value: "network", label: t("tabNetwork") },
+          ]}
+        />
       </div>
 
       {/* time range */}
-      <div className="mb-5 flex flex-wrap justify-center gap-1">
-        {RANGES.map((r) => (
-          <button
-            key={r.key}
-            onClick={() => setRange(r.key)}
-            className={cn(
-              "rounded-full px-3.5 py-1.5 text-sm font-medium transition-colors",
-              range === r.key
-                ? "bg-secondary text-foreground"
-                : "text-muted-foreground hover:bg-secondary/60 hover:text-foreground",
-            )}
-          >
-            {r.label}
-          </button>
-        ))}
+      <div className="mb-5 flex justify-center">
+        <SelectMenu
+          align="start"
+          ariaLabel="time range"
+          value={range}
+          onChange={setRange}
+          leading={<Clock className="text-muted-foreground" />}
+          options={RANGES.map((r) => ({ value: r.key, label: r.label }))}
+        />
       </div>
 
       {points.length === 0 && (
@@ -410,6 +432,35 @@ export default function ServerDetail({
   );
 }
 
+// OsBadge shows the concrete distribution (Ubuntu / Debian / …) with its logo
+// from simpleicons.org (served as an <img>, like the flags). Windows/macOS have
+// no brand logo in that set, so they fall back to a generic lucide icon.
+function OsBadge({ host }: { host: HostInfo }) {
+  const { name, slug } = osDistro(host.platform, host.os);
+  const ver = host.platformVersion ? ` ${host.platformVersion}` : "";
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      {slug ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={`https://cdn.simpleicons.org/${slug}`}
+          alt={name}
+          width={14}
+          height={14}
+          loading="lazy"
+          className="inline-block size-3.5 shrink-0 object-contain"
+        />
+      ) : (
+        <Monitor className="size-3.5 shrink-0 text-muted-foreground" />
+      )}
+      <span className="truncate">
+        {name}
+        {ver}
+      </span>
+    </span>
+  );
+}
+
 function Field({
   label,
   children,
@@ -426,28 +477,6 @@ function Field({
         {children}
       </dd>
     </div>
-  );
-}
-
-function TabBtn({
-  active,
-  onClick,
-  children,
-}: {
-  active: boolean;
-  onClick: () => void;
-  children: React.ReactNode;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      className={cn(
-        "rounded px-4 py-1.5 text-sm font-medium transition-colors",
-        active ? "bg-secondary text-foreground" : "text-muted-foreground hover:text-foreground",
-      )}
-    >
-      {children}
-    </button>
   );
 }
 

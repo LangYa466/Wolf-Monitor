@@ -13,7 +13,7 @@ export default async function ServerPage({
   params: Promise<{ id: string }>;
 }) {
   const { id: raw } = await params;
-  const id = decodeURIComponent(raw);
+  const id = decodeURIComponent(raw); // opaque (encrypted) id from the URL
 
   let node: NodeView | null = null;
   let dbError: string | null = null;
@@ -29,7 +29,7 @@ export default async function ServerPage({
       isPublic = authed ? false : await isPublicDashboard();
       if (authed || isPublic) {
         const all = await listNodes();
-        const found = all.find((n) => n.id === id) ?? null;
+        const found = all.find((n) => n.opaqueId === id) ?? null;
         node = found && !authed ? publicNodes([found])[0] : found;
       }
     }

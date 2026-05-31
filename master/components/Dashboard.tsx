@@ -6,7 +6,9 @@ import type { NodeView } from "@/lib/types";
 import { datetime, flagUrl, ibytes, pct, speed, uptime } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { useI18n } from "@/lib/i18n";
-import { LayoutGrid, List, ArrowUp, ArrowDown, LayoutDashboard, Radar, AlertTriangle } from "lucide-react";
+import { LayoutGrid, List, ArrowUp, ArrowDown, ArrowUpDown, LayoutDashboard, Radar, AlertTriangle } from "lucide-react";
+import { SegmentedControl } from "@/components/ui/segmented";
+import { SelectMenu } from "@/components/ui/select-menu";
 
 const POLL_MS = 3000;
 const SORT_KEY = "wolf_sort";
@@ -144,55 +146,43 @@ export default function Dashboard({
 
       {/* ── Filter bar ─────────────────────────────────────────────────────── */}
       <div className="mb-4 flex flex-wrap items-center gap-2">
-        <div className="flex items-center rounded-md border border-border p-0.5">
-          <ViewToggle active={view === "grid"} onClick={() => persist(setView, VIEW_KEY, "grid")} label={t("viewGrid")}>
-            <LayoutGrid />
-          </ViewToggle>
-          <ViewToggle active={view === "list"} onClick={() => persist(setView, VIEW_KEY, "list")} label={t("viewList")}>
-            <List />
-          </ViewToggle>
-        </div>
+        <SegmentedControl
+          variant="card"
+          size="sm"
+          value={view}
+          onChange={(v) => persist(setView, VIEW_KEY, v)}
+          options={[
+            { value: "grid", icon: <LayoutGrid />, title: t("viewGrid"), ariaLabel: t("viewGrid") },
+            { value: "list", icon: <List />, title: t("viewList"), ariaLabel: t("viewList") },
+          ]}
+        />
 
-        <div className="flex items-center gap-1">
-          {(
-            [
-              ["all", t("regAll")],
-              ["cn", t("regCN")],
-              ["oversea", t("regOversea")],
-            ] as [Region, string][]
-          ).map(([r, label]) => (
-            <button
-              key={r}
-              onClick={() => persist(setRegion, REGION_KEY, r)}
-              className={cn(
-                "rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
-                region === r
-                  ? "bg-secondary text-foreground"
-                  : "text-muted-foreground hover:bg-secondary/60 hover:text-foreground",
-              )}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
+        <SegmentedControl
+          value={region}
+          onChange={(v) => persist(setRegion, REGION_KEY, v)}
+          options={[
+            { value: "all", label: t("regAll") },
+            { value: "cn", label: t("regCN") },
+            { value: "oversea", label: t("regOversea") },
+          ]}
+        />
 
         <div className="flex-1" />
 
-        <div className="relative">
-          <select
-            aria-label={t("sort")}
-            value={sort}
-            onChange={(e) => persist(setSort, SORT_KEY, e.target.value as SortMode)}
-            className="h-8 rounded-md border border-border bg-card px-2.5 text-sm text-foreground outline-none focus:border-primary"
-          >
-            <option value="custom">{t("sortDefault")}</option>
-            <option value="name">{t("sortName")}</option>
-            <option value="cpu">{t("sortCpu")}</option>
-            <option value="mem">{t("sortMem")}</option>
-            <option value="country">{t("sortCountry")}</option>
-            <option value="status">{t("sortStatus")}</option>
-          </select>
-        </div>
+        <SelectMenu
+          ariaLabel={t("sort")}
+          value={sort}
+          onChange={(v) => persist(setSort, SORT_KEY, v)}
+          leading={<ArrowUpDown className="text-muted-foreground" />}
+          options={[
+            { value: "custom", label: t("sortDefault") },
+            { value: "name", label: t("sortName") },
+            { value: "cpu", label: t("sortCpu") },
+            { value: "mem", label: t("sortMem") },
+            { value: "country", label: t("sortCountry") },
+            { value: "status", label: t("sortStatus") },
+          ]}
+        />
       </div>
 
       {error && (
@@ -278,32 +268,6 @@ function SummaryCard({ label, value, dot }: { label: string; value: number; dot:
   );
 }
 
-function ViewToggle({
-  active,
-  onClick,
-  label,
-  children,
-}: {
-  active: boolean;
-  onClick: () => void;
-  label: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      aria-label={label}
-      title={label}
-      className={cn(
-        "inline-flex h-7 w-7 items-center justify-center rounded transition-colors [&_svg]:size-4",
-        active ? "bg-secondary text-foreground" : "text-muted-foreground hover:text-foreground",
-      )}
-    >
-      {children}
-    </button>
-  );
-}
-
 function StatusDot({ online }: { online: boolean }) {
   return (
     <span
@@ -354,14 +318,14 @@ function ServerRow({ node }: { node: NodeView }) {
   const { host, metrics: m } = node;
   return (
     <Link
-      href={`/server/${encodeURIComponent(node.id)}`}
+      href={`/server/${encodeURIComponent(node.opaqueId)}`}
       className="flex items-center gap-3 rounded-md border border-border bg-card px-4 py-3 transition-colors hover:border-muted-foreground/40"
     >
       <StatusDot online={node.online} />
       <Flag cc={node.country} />
       <div className="min-w-0 flex-1">
         <div className="truncate text-[15px] font-semibold" title={host.hostname}>
-          {host.hostname}
+          {node.name?.trim() || host.hostname}
         </div>
         <div className="truncate text-[11px] text-muted-foreground">
           {host.arch}
@@ -386,7 +350,7 @@ function ServerListRow({ node, first }: { node: NodeView; first: boolean }) {
   const { host, metrics: m } = node;
   return (
     <Link
-      href={`/server/${encodeURIComponent(node.id)}`}
+      href={`/server/${encodeURIComponent(node.opaqueId)}`}
       className={cn(
         "flex items-center gap-3 bg-card px-4 py-2.5 transition-colors hover:bg-secondary/40",
         !first && "border-t border-border",
@@ -395,7 +359,7 @@ function ServerListRow({ node, first }: { node: NodeView; first: boolean }) {
       <StatusDot online={node.online} />
       <Flag cc={node.country} />
       <span className="w-40 shrink-0 truncate text-[14px] font-medium" title={host.hostname}>
-        {host.hostname}
+        {node.name?.trim() || host.hostname}
       </span>
       <span className="hidden w-24 shrink-0 truncate text-xs text-muted-foreground sm:inline">
         {host.arch}
