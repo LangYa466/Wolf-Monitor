@@ -55,6 +55,15 @@ export function SegmentedControl<T extends string>({
     return () => ro.disconnect();
   }, [measure]);
 
+  // Don't animate the pill on first mount — it would slide in from left:0 /
+  // width:0 every time the page (re)mounts, which reads as a flash. Enable the
+  // transition only after the initial measured position has painted.
+  const [animate, setAnimate] = React.useState(false);
+  React.useEffect(() => {
+    const id = requestAnimationFrame(() => setAnimate(true));
+    return () => cancelAnimationFrame(id);
+  }, []);
+
   const pad = variant === "card" ? (size === "sm" ? "p-0.5" : "p-1") : "";
   const inset = variant === "card" ? (size === "sm" ? 4 : 8) : 0;
 
@@ -72,7 +81,8 @@ export function SegmentedControl<T extends string>({
       <span
         aria-hidden
         className={cn(
-          "absolute top-1/2 -translate-y-1/2 rounded bg-secondary transition-[left,width,opacity] duration-300 ease-out motion-reduce:transition-none",
+          "absolute top-1/2 -translate-y-1/2 rounded bg-secondary",
+          animate && "transition-[left,width,opacity] duration-300 ease-out motion-reduce:transition-none",
           ind.ready ? "opacity-100" : "opacity-0",
         )}
         style={{ left: ind.left, width: ind.width, height: `calc(100% - ${inset}px)` }}

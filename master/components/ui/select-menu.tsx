@@ -31,6 +31,14 @@ export function SelectMenu<T extends string>({
   const ref = React.useRef<HTMLDivElement>(null);
   const current = options.find((o) => o.value === value);
 
+  // Enable the open/close transition only after the first paint, so the closed
+  // menu doesn't animate (flash) when the component (re)mounts on navigation.
+  const [animate, setAnimate] = React.useState(false);
+  React.useEffect(() => {
+    const id = requestAnimationFrame(() => setAnimate(true));
+    return () => cancelAnimationFrame(id);
+  }, []);
+
   React.useEffect(() => {
     if (!open) return;
     function onDoc(e: MouseEvent) {
@@ -69,7 +77,8 @@ export function SelectMenu<T extends string>({
       <div
         role="listbox"
         className={cn(
-          "absolute z-50 mt-1.5 min-w-full overflow-hidden rounded-md border border-border bg-popover p-1 shadow-lg transition-all duration-150 ease-out motion-reduce:transition-none",
+          "absolute z-50 mt-1.5 min-w-full overflow-hidden rounded-md border border-border bg-popover p-1 shadow-lg",
+          animate && "transition-[opacity,transform] duration-150 ease-out motion-reduce:transition-none",
           align === "end" ? "right-0 origin-top-right" : "left-0 origin-top-left",
           open
             ? "pointer-events-auto scale-100 opacity-100"

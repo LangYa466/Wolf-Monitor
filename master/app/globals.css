@@ -4,9 +4,10 @@
 
 @layer base {
   :root {
-    /* Fonts — Noto Sans TC (Traditional Chinese + Latin), JetBrains Mono for code. */
-    --font-sans: "Noto Sans TC", -apple-system, BlinkMacSystemFont, "Segoe UI",
-      "PingFang TC", "Microsoft JhengHei", "Helvetica Neue", Arial, sans-serif;
+    /* 全局字体：本机优先用更纱黑体（中英文名都列上以兼容不同系统的注册名），
+       未安装时回退到 Google Fonts 加载的 Noto Sans SC（思源黑体，字形最接近）与 Geist。 */
+    --font-sans: "Sarasa Gothic SC", "更纱黑体 SC", "Sarasa Gothic", "更纱黑体",
+      "Noto Sans SC", "Geist", ui-sans-serif, system-ui, sans-serif;
     --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco,
       Consolas, "Liberation Mono", "Courier New", monospace;
 
@@ -89,6 +90,26 @@
 }
 .nav-progress-shimmer {
   animation: nav-progress-shimmer 1.2s ease-in-out infinite;
+}
+
+/* Tab content enter animation (settings section switch, etc.). */
+@keyframes tab-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.tab-fade-in {
+  animation: tab-fade-in 200ms ease-out;
+}
+@media (prefers-reduced-motion: reduce) {
+  .tab-fade-in {
+    animation: none;
+  }
 }
 
 /* Thin Pterodactyl-style scrollbars. */

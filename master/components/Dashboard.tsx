@@ -14,10 +14,12 @@ const POLL_MS = 3000;
 const SORT_KEY = "wolf_sort";
 const VIEW_KEY = "wolf_view";
 const REGION_KEY = "wolf_region";
+const STATUS_KEY = "wolf_status";
 
 type SortMode = "custom" | "name" | "cpu" | "mem" | "country" | "status";
 type ViewMode = "grid" | "list";
 type Region = "all" | "cn" | "oversea";
+type StatusFilter = "all" | "online" | "offline";
 
 export default function Dashboard({
   initial,
@@ -34,6 +36,7 @@ export default function Dashboard({
   const [sort, setSort] = useState<SortMode>("custom");
   const [view, setView] = useState<ViewMode>("grid");
   const [region, setRegion] = useState<Region>("all");
+  const [status, setStatus] = useState<StatusFilter>("all");
   const [now, setNow] = useState<number>(() => initial.length ? initial[0].lastSeen : 0);
 
   // Live updates + 1s clock tick.
@@ -41,6 +44,7 @@ export default function Dashboard({
     setSort((localStorage.getItem(SORT_KEY) as SortMode) || "custom");
     setView((localStorage.getItem(VIEW_KEY) as ViewMode) || "grid");
     setRegion((localStorage.getItem(REGION_KEY) as Region) || "all");
+    setStatus((localStorage.getItem(STATUS_KEY) as StatusFilter) || "all");
     setNow(Date.now());
 
     let alive = true;
@@ -100,8 +104,10 @@ export default function Dashboard({
     let arr = nodes;
     if (region === "cn") arr = arr.filter((n) => n.country === "cn");
     else if (region === "oversea") arr = arr.filter((n) => n.country && n.country !== "cn");
+    if (status === "online") arr = arr.filter((n) => n.online);
+    else if (status === "offline") arr = arr.filter((n) => !n.online);
     return sortNodes(arr, sort);
-  }, [nodes, sort, region]);
+  }, [nodes, sort, region, status]);
 
   return (
     <div>
@@ -137,11 +143,29 @@ export default function Dashboard({
         </div>
       </div>
 
-      {/* ── Summary cards ──────────────────────────────────────────────────── */}
+      {/* ── Summary cards (also act as a status filter) ────────────────────── */}
       <div className="mb-5 grid grid-cols-1 gap-3 sm:grid-cols-3">
-        <SummaryCard label={t("totalServers")} value={nodes.length} dot="bg-primary" />
-        <SummaryCard label={t("onlineServers")} value={online} dot="bg-success" />
-        <SummaryCard label={t("offlineServers")} value={offline} dot={offline ? "bg-destructive" : "bg-muted-foreground"} />
+        <SummaryCard
+          label={t("totalServers")}
+          value={nodes.length}
+          dot="bg-primary"
+          active={status === "all"}
+          onClick={() => persist(setStatus, STATUS_KEY, "all")}
+        />
+        <SummaryCard
+          label={t("onlineServers")}
+          value={online}
+          dot="bg-success"
+          active={status === "online"}
+          onClick={() => persist(setStatus, STATUS_KEY, "online")}
+        />
+        <SummaryCard
+          label={t("offlineServers")}
+          value={offline}
+          dot={offline ? "bg-destructive" : "bg-muted-foreground"}
+          active={status === "offline"}
+          onClick={() => persist(setStatus, STATUS_KEY, "offline")}
+        />
       </div>
 
       {/* ── Filter bar ─────────────────────────────────────────────────────── */}
@@ -256,15 +280,37 @@ function Traffic({
   );
 }
 
-function SummaryCard({ label, value, dot }: { label: string; value: number; dot: string }) {
+function SummaryCard({
+  label,
+  value,
+  dot,
+  active,
+  onClick,
+}: {
+  label: string;
+  value: number;
+  dot: string;
+  active: boolean;
+  onClick: () => void;
+}) {
   return (
-    <div className="flex items-center justify-between rounded-md border border-border bg-card px-4 py-3.5">
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      className={cn(
+        "flex items-center justify-between rounded-md border bg-card px-4 py-3.5 text-left transition-colors",
+        active
+          ? "border-primary/70 ring-1 ring-primary/40"
+          : "border-border hover:border-muted-foreground/40",
+      )}
+    >
       <span className="flex items-center gap-2 text-sm text-muted-foreground">
         <span className={cn("h-2 w-2 rounded-full", dot)} />
         {label}
       </span>
-      <span className="text-2xl font-bold tnum">{value}</span>
-    </div>
+      <span className={cn("text-2xl font-bold tnum", active && "text-primary")}>{value}</span>
+    </button>
   );
 }
 
@@ -328,9 +374,7 @@ function ServerRow({ node }: { node: NodeView }) {
           {node.name?.trim() || host.hostname}
         </div>
         <div className="truncate text-[11px] text-muted-foreground">
-          {host.arch}
-          {node.country ? ` · ${node.country.toUpperCase()}` : ""}
-          {node.online ? ` · ${uptime(m.uptime)}` : ` · ${t("offline")}`}
+          {node.online ? uptime(m.uptime) : t("offline")} · {host.arch}
         </div>
       </div>
       <div className="grid shrink-0 grid-cols-5 gap-x-3 sm:gap-x-4">
@@ -358,12 +402,14 @@ function ServerListRow({ node, first }: { node: NodeView; first: boolean }) {
     >
       <StatusDot online={node.online} />
       <Flag cc={node.country} />
-      <span className="w-40 shrink-0 truncate text-[14px] font-medium" title={host.hostname}>
-        {node.name?.trim() || host.hostname}
-      </span>
-      <span className="hidden w-24 shrink-0 truncate text-xs text-muted-foreground sm:inline">
-        {host.arch}
-      </span>
+      <div className="w-44 shrink-0">
+        <div className="truncate text-[14px] font-medium" title={host.hostname}>
+          {node.name?.trim() || host.hostname}
+        </div>
+        <div className="truncate text-[11px] text-muted-foreground">
+          {node.online ? uptime(m.uptime) : t("offline")} · {host.arch}
+        </div>
+      </div>
       <div className="flex flex-1 justify-end gap-x-4 sm:gap-x-6">
         <Cell label={t("mCpu")} value={pct(m.cpuUsage)} className={pctColor(m.cpuUsage)} />
         <Cell label={t("mMem")} value={pct(m.memPercent)} className={pctColor(m.memPercent)} />

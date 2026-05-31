@@ -102,36 +102,36 @@ export function osBadge(os: string): string {
 }
 
 // osDistro resolves the concrete distribution (Ubuntu / Debian / …) from the
-// node's reported `platform`, falling back to the generic OS. `slug` is a
-// simpleicons.org slug for the logo (rendered via their CDN, like the flags),
-// or null when no brand logo is available (Windows/macOS were removed from the
-// set) — callers should show a generic icon instead.
+// node's reported `platform`, falling back to the generic OS. `logo` is a
+// font-logos CSS class (https://github.com/Lukas-W/font-logos) rendered as an
+// icon-font glyph — it covers Linux distros plus Windows/macOS (Tux as the
+// generic Linux fallback).
 export function osDistro(
   platform: string,
   os: string,
-): { name: string; slug: string | null } {
+): { name: string; logo: string } {
   const p = (platform || "").toLowerCase();
   const o = (os || "").toLowerCase();
-  const table: [RegExp, string, string | null][] = [
-    [/ubuntu/, "Ubuntu", "ubuntu"],
-    [/debian/, "Debian", "debian"],
-    [/cent\s?os/, "CentOS", "centos"],
-    [/fedora/, "Fedora", "fedora"],
-    [/red\s?hat|rhel/, "RHEL", "redhat"],
-    [/rocky/, "Rocky Linux", "rockylinux"],
-    [/alma/, "AlmaLinux", "almalinux"],
-    [/arch/, "Arch Linux", "archlinux"],
-    [/manjaro/, "Manjaro", "manjaro"],
-    [/alpine/, "Alpine", "alpinelinux"],
-    [/(open)?suse/, "openSUSE", "opensuse"],
-    [/mint/, "Linux Mint", "linuxmint"],
-    [/gentoo/, "Gentoo", "gentoo"],
-    [/raspbian|raspberry/, "Raspberry Pi OS", "raspberrypi"],
+  const table: [RegExp, string, string][] = [
+    [/ubuntu/, "Ubuntu", "fl-ubuntu"],
+    [/debian/, "Debian", "fl-debian"],
+    [/cent\s?os/, "CentOS", "fl-centos"],
+    [/fedora/, "Fedora", "fl-fedora"],
+    [/red\s?hat|rhel/, "RHEL", "fl-redhat"],
+    [/rocky/, "Rocky Linux", "fl-rocky-linux"],
+    [/alma/, "AlmaLinux", "fl-almalinux"],
+    [/arch/, "Arch Linux", "fl-archlinux"],
+    [/manjaro/, "Manjaro", "fl-manjaro"],
+    [/alpine/, "Alpine", "fl-alpine"],
+    [/(open)?suse/, "openSUSE", "fl-opensuse"],
+    [/mint/, "Linux Mint", "fl-linuxmint"],
+    [/gentoo/, "Gentoo", "fl-gentoo"],
+    [/raspbian|raspberry/, "Raspberry Pi OS", "fl-raspberry-pi"],
   ];
-  for (const [re, name, slug] of table) if (re.test(p)) return { name, slug };
-  if (o.includes("windows") || p.includes("windows")) return { name: "Windows", slug: null };
+  for (const [re, name, logo] of table) if (re.test(p)) return { name, logo };
+  if (o.includes("windows") || p.includes("windows")) return { name: "Windows", logo: "fl-windows" };
   if (o.includes("darwin") || o.includes("mac") || p.includes("darwin"))
-    return { name: "macOS", slug: null };
-  if (o.includes("linux")) return { name: "Linux", slug: "linux" };
-  return { name: platform || os || "Unknown", slug: null };
+    return { name: "macOS", logo: "fl-apple" };
+  if (o.includes("linux")) return { name: "Linux", logo: "fl-tux" };
+  return { name: platform || os || "Unknown", logo: "fl-tux" };
 }

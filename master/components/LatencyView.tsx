@@ -15,6 +15,7 @@ export default function LatencyView() {
   const { t } = useI18n();
   const [tasks, setTasks] = useState<PingTask[]>([]);
   const [results, setResults] = useState<PingResult[]>([]);
+  const [names, setNames] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -33,6 +34,19 @@ export default function LatencyView() {
           setResults(data.results);
           setError(null);
         }
+        // Node display names so rows show the renamed label, not the hostname.
+        const nr = await fetch("/api/nodes", { cache: "no-store" });
+        if (nr.ok && alive) {
+          const nd = await nr.json();
+          setNames(
+            Object.fromEntries(
+              (nd.nodes ?? []).map((n: { id: string; name: string | null }) => [
+                n.id,
+                (n.name ?? "").trim() || n.id,
+              ]),
+            ),
+          );
+        }
       } catch (e) {
         if (alive) setError(e instanceof Error ? e.message : "fetch failed");
       }
@@ -44,6 +58,8 @@ export default function LatencyView() {
       clearInterval(t);
     };
   }, []);
+
+  const nameOf = (id: string) => names[id] ?? id;
 
   const byTask = useMemo(() => {
     const m = new Map<string, PingResult[]>();
@@ -116,7 +132,7 @@ export default function LatencyView() {
                       <tbody>
                         {rows.map((r) => (
                           <tr key={r.nodeId} className="border-b border-border last:border-0">
-                            <td className="py-1 text-muted-foreground">{r.nodeId}</td>
+                            <td className="py-1 text-muted-foreground" title={r.nodeId}>{nameOf(r.nodeId)}</td>
                             <td className="py-1 text-right font-semibold tnum">
                               {r.success ? (
                                 <span className={latColor(r.latencyMs)}>

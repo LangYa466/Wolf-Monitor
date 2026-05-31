@@ -5,6 +5,7 @@ import Link from "next/link";
 import type { NodeView } from "@/lib/types";
 import type { HistoryPoint } from "@/lib/db";
 import {
+  ago,
   datetime,
   flagUrl,
   ibytes,
@@ -14,10 +15,11 @@ import {
   uptime,
   uptimeCJK,
 } from "@/lib/format";
+import type { PingResult, PingTask } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { MetricChart } from "@/components/Charts";
 import { useI18n } from "@/lib/i18n";
-import { ChevronLeft, ArrowUp, ArrowDown, LayoutDashboard, Radar, AlertTriangle, Monitor, Clock } from "lucide-react";
+import { ChevronLeft, ArrowUp, ArrowDown, LayoutDashboard, Radar, AlertTriangle, Clock } from "lucide-react";
 import { SegmentedControl } from "@/components/ui/segmented";
 import { SelectMenu } from "@/components/ui/select-menu";
 import type { HostInfo } from "@/lib/types";
@@ -62,6 +64,10 @@ export default function ServerDetail({
   const [tab, setTab] = useState<Tab>("detail");
   const [now, setNow] = useState<number>(initial?.lastSeen ?? 0);
   const [error, setError] = useState<string | null>(dbError);
+  const [ping, setPing] = useState<{ tasks: PingTask[]; results: PingResult[] }>({
+    tasks: [],
+    results: [],
+  });
 
   // Live node state (header values) — poll the list and pick out this node.
   useEffect(() => {
@@ -121,6 +127,31 @@ export default function ServerDetail({
     const t = setInterval(loadHistory, POLL_MS);
     return () => clearInterval(t);
   }, [loadHistory, range]);
+
+  // Latency feed for the Network tab (admin-only endpoint; guests get 401 and
+  // simply see no latency). Filtered to this node below.
+  useEffect(() => {
+    let alive = true;
+    async function load() {
+      try {
+        const res = await fetch("/api/ping-results", { cache: "no-store" });
+        if (!res.ok) {
+          if (alive) setPing({ tasks: [], results: [] });
+          return;
+        }
+        const d = await res.json();
+        if (alive) setPing({ tasks: d.tasks ?? [], results: d.results ?? [] });
+      } catch {
+        /* keep previous */
+      }
+    }
+    load();
+    const t = setInterval(load, 5000);
+    return () => {
+      alive = false;
+      clearInterval(t);
+    };
+  }, []);
 
   if (!node) {
     return (
@@ -376,8 +407,8 @@ export default function ServerDetail({
         </div>
       )}
 
-      {/* tabs */}
-      <div className="mb-4 flex justify-center">
+      {/* tabs (left) + time range (right) on one row */}
+      <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
         <SegmentedControl
           variant="card"
           value={tab}
@@ -387,12 +418,8 @@ export default function ServerDetail({
             { value: "network", label: t("tabNetwork") },
           ]}
         />
-      </div>
-
-      {/* time range */}
-      <div className="mb-5 flex justify-center">
         <SelectMenu
-          align="start"
+          align="end"
           ariaLabel="time range"
           value={range}
           onChange={setRange}
@@ -419,9 +446,12 @@ export default function ServerDetail({
           {tcpChart}
         </div>
       ) : (
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-          {netChart}
-          {tcpChart}
+        <div className="space-y-3">
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+            {netChart}
+            {tcpChart}
+          </div>
+          <NodeLatency nodeId={node.id} ping={ping} />
         </div>
       )}
 
@@ -432,27 +462,72 @@ export default function ServerDetail({
   );
 }
 
+function latColor(ms: number): string {
+  if (ms >= 250) return "text-destructive";
+  if (ms >= 120) return "text-warning";
+  return "text-success";
+}
+
+// NodeLatency lists this server's own latency probes (filtered to its node id)
+// inside the Network tab. Hidden entirely when there's nothing to show (e.g. a
+// guest, who can't read the admin-only latency feed).
+function NodeLatency({
+  nodeId,
+  ping,
+}: {
+  nodeId: string;
+  ping: { tasks: PingTask[]; results: PingResult[] };
+}) {
+  const { t } = useI18n();
+  const rows = ping.results
+    .filter((r) => r.nodeId === nodeId)
+    .map((r) => ({ r, task: ping.tasks.find((x) => x.id === r.taskId) }))
+    .filter((x): x is { r: PingResult; task: PingTask } => Boolean(x.task))
+    .sort((a, b) => a.task.name.localeCompare(b.task.name));
+
+  if (rows.length === 0) return null;
+
+  return (
+    <div className="rounded-md border border-border bg-card p-4">
+      <div className="mb-3 text-[15px] font-semibold tracking-tight">{t("ownLatency")}</div>
+      <div className="divide-y divide-border">
+        {rows.map(({ r, task }) => (
+          <div key={task.id} className="flex items-center gap-3 py-2 text-sm">
+            <span
+              className={cn(
+                "h-2 w-2 shrink-0 rounded-full",
+                task.enabled ? "bg-success" : "bg-muted-foreground",
+              )}
+            />
+            <span className="min-w-0 flex-1 truncate font-medium" title={task.target}>
+              {task.name}
+              <span className="ml-2 text-xs font-normal text-muted-foreground">{task.target}</span>
+            </span>
+            <span className="shrink-0 font-semibold tnum">
+              {r.success ? (
+                <span className={latColor(r.latencyMs)}>{r.latencyMs.toFixed(1)} ms</span>
+              ) : (
+                <span className="text-destructive">{t("timeout")}</span>
+              )}
+            </span>
+            <span className="w-16 shrink-0 text-right text-[11px] text-muted-foreground tnum">
+              {ago(r.ts)}
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // OsBadge shows the concrete distribution (Ubuntu / Debian / …) with its logo
-// from simpleicons.org (served as an <img>, like the flags). Windows/macOS have
-// no brand logo in that set, so they fall back to a generic lucide icon.
+// rendered from the font-logos icon font (covers Linux distros + Windows/macOS).
 function OsBadge({ host }: { host: HostInfo }) {
-  const { name, slug } = osDistro(host.platform, host.os);
+  const { name, logo } = osDistro(host.platform, host.os);
   const ver = host.platformVersion ? ` ${host.platformVersion}` : "";
   return (
     <span className="inline-flex items-center gap-1.5">
-      {slug ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img
-          src={`https://cdn.simpleicons.org/${slug}`}
-          alt={name}
-          width={14}
-          height={14}
-          loading="lazy"
-          className="inline-block size-3.5 shrink-0 object-contain"
-        />
-      ) : (
-        <Monitor className="size-3.5 shrink-0 text-muted-foreground" />
-      )}
+      <i className={cn(logo, "shrink-0 text-[15px] leading-none")} aria-hidden />
       <span className="truncate">
         {name}
         {ver}

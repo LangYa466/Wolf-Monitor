@@ -127,20 +127,26 @@ export async function upsertOfflineSetting(
 export async function listPingTasks(): Promise<PingTask[]> {
   await ensureSchema();
   const { rows } = await getPool().query(
-    `SELECT id, name, target, type, interval_seconds, node_ids, enabled
+    `SELECT id, name, target, type, interval_seconds, node_ids, exclude, enabled
        FROM ping_tasks ORDER BY name`
   );
   return rows.map(mapTask);
 }
 
-// Tasks a specific node should run (its id is in node_ids, or node_ids empty).
+// Tasks a specific node should run. Allowlist mode (exclude=false): node_ids
+// empty OR contains this node. Blacklist mode (exclude=true): node_ids does NOT
+// contain this node.
 export async function pingTasksForNode(nodeId: string): Promise<PingTask[]> {
   await ensureSchema();
   const { rows } = await getPool().query(
-    `SELECT id, name, target, type, interval_seconds, node_ids, enabled
+    `SELECT id, name, target, type, interval_seconds, node_ids, exclude, enabled
        FROM ping_tasks
       WHERE enabled = TRUE
-        AND (node_ids = '[]'::jsonb OR node_ids ? $1)`,
+        AND (
+          (exclude = FALSE AND (node_ids = '[]'::jsonb OR node_ids ? $1))
+          OR
+          (exclude = TRUE AND NOT (node_ids ? $1))
+        )`,
     [nodeId]
   );
   return rows.map(mapTask);
@@ -154,6 +160,7 @@ function mapTask(r: any): PingTask {
     type: r.type as PingType,
     intervalSeconds: r.interval_seconds,
     nodeIds: r.node_ids ?? [],
+    exclude: r.exclude ?? false,
     enabled: r.enabled,
   };
 }
@@ -170,15 +177,16 @@ export async function upsertPingTask(
     type: (task.type as PingType) === "icmp" ? "icmp" : "tcp",
     intervalSeconds: Math.max(5, Math.round(task.intervalSeconds ?? 60)),
     nodeIds: task.nodeIds ?? [],
+    exclude: task.exclude ?? false,
     enabled: task.enabled ?? true,
   };
   await getPool().query(
-    `INSERT INTO ping_tasks (id, name, target, type, interval_seconds, node_ids, enabled)
-     VALUES ($1,$2,$3,$4,$5,$6,$7)
+    `INSERT INTO ping_tasks (id, name, target, type, interval_seconds, node_ids, exclude, enabled)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
      ON CONFLICT (id) DO UPDATE SET
        name=EXCLUDED.name, target=EXCLUDED.target, type=EXCLUDED.type,
        interval_seconds=EXCLUDED.interval_seconds, node_ids=EXCLUDED.node_ids,
-       enabled=EXCLUDED.enabled`,
+       exclude=EXCLUDED.exclude, enabled=EXCLUDED.enabled`,
     [
       row.id,
       row.name,
@@ -186,6 +194,7 @@ export async function upsertPingTask(
       row.type,
       row.intervalSeconds,
       JSON.stringify(row.nodeIds),
+      row.exclude,
       row.enabled,
     ]
   );

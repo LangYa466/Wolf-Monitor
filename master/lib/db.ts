@@ -175,6 +175,10 @@ ALTER TABLE metrics_history ADD COLUMN IF NOT EXISTS swap_used BIGINT NOT NULL D
 -- rows with sequence values automatically.
 ALTER TABLE nodes ADD COLUMN IF NOT EXISTS seq  BIGSERIAL;
 ALTER TABLE nodes ADD COLUMN IF NOT EXISTS name TEXT;
+
+-- Latency task node selection mode: when true, node_ids is a blacklist
+-- (all nodes probe the target except those listed) instead of an allowlist.
+ALTER TABLE ping_tasks ADD COLUMN IF NOT EXISTS exclude BOOLEAN NOT NULL DEFAULT FALSE;
 `;
 
 // Generic key/value settings (notification config, etc.).

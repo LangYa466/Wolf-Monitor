@@ -21,6 +21,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { SelectMenu } from "@/components/ui/select-menu";
+import { SegmentedControl } from "@/components/ui/segmented";
+import { NodeMultiSelect } from "@/components/ui/node-multiselect";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
@@ -34,7 +36,33 @@ import {
 } from "@/components/ui/table";
 import { flagUrl } from "@/lib/format";
 import { useI18n } from "@/lib/i18n";
-import { GripVertical, Trash2, RotateCw, Check, Minus, AlertTriangle } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { GripVertical, Trash2, RotateCw, Check, Minus, AlertTriangle, Terminal } from "lucide-react";
+
+// Install commands for a node (identical for every server — the node reports
+// its own hostname; reinstalling just re-runs the same token-based command).
+// Used both for the general snippet and the per-server "view install script".
+function InstallSnippet({ base, tok, hostname }: { base: string; tok: string; hostname?: string }) {
+  const { t } = useI18n();
+  return (
+    <div className="space-y-2 rounded-md bg-muted/60 p-3 text-xs">
+      {hostname && (
+        <div className="font-medium text-foreground">
+          {t("viewInstall")} · <span className="font-mono">{hostname}</span>
+        </div>
+      )}
+      <div className="text-muted-foreground">{t("installLinux")}</div>
+      <code className="block break-all text-primary">
+        {`wget -qO- https://raw.githubusercontent.com/LangYa466/Wolf-Monitor/main/node/install.sh | sudo bash -s -- -e ${base} -t ${tok} -T http`}
+      </code>
+      <div className="text-muted-foreground">{t("installWin")}</div>
+      <code className="block break-all text-primary">
+        {`powershell -NoProfile -ExecutionPolicy Bypass -Command "iwr 'https://raw.githubusercontent.com/LangYa466/Wolf-Monitor/main/node/install.ps1' -UseBasicParsing -OutFile 'install.ps1'; & '.\\install.ps1' '-e' '${base}' '-t' '${tok}' '-T' 'http'"`}
+      </code>
+      <div className="text-muted-foreground">{t("installWs")}</div>
+    </div>
+  );
+}
 
 // Renders a node's on/off state as an icon (no emoji).
 function OnOff({ on }: { on: boolean }) {
@@ -60,6 +88,7 @@ export default function SettingsView() {
   const { t } = useI18n();
   const [ready, setReady] = useState(false);
   const [nodes, setNodes] = useState<NodeView[]>([]);
+  const [tab, setTab] = useState<SettingsTab>("servers");
 
   useEffect(() => {
     fetch("/api/auth/status")
@@ -76,6 +105,16 @@ export default function SettingsView() {
       .catch(() => {});
   }, []);
 
+  useEffect(() => {
+    const stored = localStorage.getItem(TAB_KEY) as SettingsTab | null;
+    if (stored && TABS.some((x) => x.value === stored)) setTab(stored);
+  }, []);
+
+  function changeTab(v: SettingsTab) {
+    setTab(v);
+    localStorage.setItem(TAB_KEY, v);
+  }
+
   if (!ready) {
     return <p className="py-20 text-center text-muted-foreground">{t("loading")}</p>;
   }
@@ -90,14 +129,38 @@ export default function SettingsView() {
         </h1>
       </header>
 
-      <ServersSection nodes={nodes} />
-      <NotificationSettings />
-      <AlertRules nodeIds={nodeIds} />
-      <OfflineSettings nodes={nodes} />
-      <PingTasks nodeIds={nodeIds} />
+      {/* section tabs — switch instead of scrolling through every card */}
+      <div className="sticky top-16 z-30 -mx-4 border-b border-border bg-background/85 px-4 py-2 backdrop-blur sm:-mx-6 sm:px-6">
+        <SegmentedControl
+          variant="card"
+          value={tab}
+          onChange={changeTab}
+          className="max-w-full overflow-x-auto"
+          options={TABS.map((x) => ({ value: x.value, label: t(x.key) }))}
+        />
+      </div>
+
+      {/* animated section content */}
+      <div key={tab} className="tab-fade-in">
+        {tab === "servers" && <ServersSection nodes={nodes} />}
+        {tab === "notify" && <NotificationSettings />}
+        {tab === "alerts" && <AlertRules nodeIds={nodeIds} />}
+        {tab === "offline" && <OfflineSettings nodes={nodes} />}
+        {tab === "ping" && <PingTasks nodes={nodes} />}
+      </div>
     </div>
   );
 }
+
+type SettingsTab = "servers" | "notify" | "alerts" | "offline" | "ping";
+const TAB_KEY = "wolf_settings_tab";
+const TABS: { value: SettingsTab; key: string }[] = [
+  { value: "servers", key: "secServers" },
+  { value: "notify", key: "secNotify" },
+  { value: "alerts", key: "secAlerts" },
+  { value: "offline", key: "secOffline" },
+  { value: "ping", key: "secPing" },
+];
 
 // ── Servers: token, ipinfo, drag reorder ────────────────────────────────────
 
@@ -111,6 +174,7 @@ function ServersSection({ nodes }: { nodes: NodeView[] }) {
   const [names, setNames] = useState<Record<string, string>>({});
   const [cipherKey, setCipherKey] = useState("");
   const [cipherTweak, setCipherTweak] = useState("");
+  const [openInstall, setOpenInstall] = useState<string | null>(null);
   const [msg, setMsg] = useState("");
 
   useEffect(() => setOrder(nodes), [nodes]);
@@ -222,17 +286,7 @@ function ServersSection({ nodes }: { nodes: NodeView[] }) {
             </Button>
           </div>
         </Field>
-        <div className="space-y-2 rounded-md bg-muted/60 p-3 text-xs">
-          <div className="text-muted-foreground">{t("installLinux")}</div>
-          <code className="block break-all text-primary">
-            {`wget -qO- https://raw.githubusercontent.com/LangYa466/Wolf-Monitor/main/node/install.sh | sudo bash -s -- -e ${base} -t ${tok} -T http`}
-          </code>
-          <div className="text-muted-foreground">{t("installWin")}</div>
-          <code className="block break-all text-primary">
-            {`powershell -NoProfile -ExecutionPolicy Bypass -Command "iwr 'https://raw.githubusercontent.com/LangYa466/Wolf-Monitor/main/node/install.ps1' -UseBasicParsing -OutFile 'install.ps1'; & '.\\install.ps1' '-e' '${base}' '-t' '${tok}' '-T' 'http'"`}
-          </code>
-          <div className="text-muted-foreground">{t("installWs")}</div>
-        </div>
+        <InstallSnippet base={base} tok={tok} />
 
         <Field label={t("ipinfoLabel")}>
           <div className="flex gap-2">
@@ -246,38 +300,59 @@ function ServersSection({ nodes }: { nodes: NodeView[] }) {
           <div className="mt-2 space-y-1.5">
             {order.length === 0 && <p className="text-sm text-muted-foreground">{t("noServersYet")}</p>}
             {order.map((n) => (
-              <div
-                key={n.id}
-                onDragOver={(e) => e.preventDefault()}
-                onDrop={() => onDrop(n.id)}
-                className="flex items-center gap-2 rounded-md border border-border bg-background px-2 py-1.5 text-sm"
-              >
-                {/* drag handle — only this part starts a drag, so the name input stays usable */}
-                <span
-                  draggable
-                  onDragStart={() => setDragId(n.id)}
-                  className="cursor-grab p-1 text-muted-foreground active:cursor-grabbing"
-                  title={n.host.hostname}
+              <div key={n.id}>
+                <div
+                  onDragOver={(e) => e.preventDefault()}
+                  onDrop={() => onDrop(n.id)}
+                  className="flex items-center gap-2 rounded-md border border-border bg-background px-2 py-1.5 text-sm"
                 >
-                  <GripVertical className="size-4" />
-                </span>
-                {n.country && (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={flagUrl(n.country)} alt={n.country} width={18} height={13} className="shrink-0 rounded-[2px]" />
+                  {/* drag handle — only this part starts a drag, so the name input stays usable */}
+                  <span
+                    draggable
+                    onDragStart={() => setDragId(n.id)}
+                    className="cursor-grab p-1 text-muted-foreground active:cursor-grabbing"
+                    title={n.host.hostname}
+                  >
+                    <GripVertical className="size-4" />
+                  </span>
+                  {n.country && (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={flagUrl(n.country)} alt={n.country} width={18} height={13} className="shrink-0 rounded-[2px]" />
+                  )}
+                  <Input
+                    value={names[n.id] ?? ""}
+                    placeholder={n.host.hostname}
+                    onChange={(e) => setNames((m) => ({ ...m, [n.id]: e.target.value }))}
+                    onBlur={() => {
+                      if ((names[n.id] ?? "") !== (n.name ?? "")) saveName(n.id);
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") e.currentTarget.blur();
+                    }}
+                    className="h-8"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setOpenInstall((cur) => (cur === n.id ? null : n.id))}
+                    aria-label={t("viewInstall")}
+                    title={t("viewInstall")}
+                    aria-expanded={openInstall === n.id}
+                    className={cn(
+                      "inline-flex size-7 shrink-0 items-center justify-center rounded transition-colors [&_svg]:size-4",
+                      openInstall === n.id
+                        ? "bg-secondary text-foreground"
+                        : "text-muted-foreground hover:bg-secondary/60 hover:text-foreground",
+                    )}
+                  >
+                    <Terminal />
+                  </button>
+                  <span className={`ml-1 h-2 w-2 shrink-0 rounded-full ${n.online ? "bg-success" : "bg-destructive"}`} />
+                </div>
+                {openInstall === n.id && (
+                  <div className="tab-fade-in mt-1.5">
+                    <InstallSnippet base={base} tok={tok} hostname={n.host.hostname} />
+                  </div>
                 )}
-                <Input
-                  value={names[n.id] ?? ""}
-                  placeholder={n.host.hostname}
-                  onChange={(e) => setNames((m) => ({ ...m, [n.id]: e.target.value }))}
-                  onBlur={() => {
-                    if ((names[n.id] ?? "") !== (n.name ?? "")) saveName(n.id);
-                  }}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") e.currentTarget.blur();
-                  }}
-                  className="h-8"
-                />
-                <span className={`ml-1 h-2 w-2 shrink-0 rounded-full ${n.online ? "bg-success" : "bg-destructive"}`} />
               </div>
             ))}
           </div>
@@ -520,6 +595,10 @@ function OfflineSettings({ nodes }: { nodes: NodeView[] }) {
 
   const byId = new Map(settings.map((s) => [s.nodeId, s]));
   const rows = nodes.map((n) => byId.get(n.id) ?? defaultOffline(n.id));
+  const labelOf = (id: string) => {
+    const n = nodes.find((x) => x.id === id);
+    return n?.name?.trim() || id;
+  };
 
   async function save(nodeId: string, enabled: boolean, graceSeconds: number) {
     if ((await api("/api/offline", "POST", { nodeId, enabled, graceSeconds })).ok) load();
@@ -539,7 +618,7 @@ function OfflineSettings({ nodes }: { nodes: NodeView[] }) {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {rows.map((s) => <OfflineRow key={s.nodeId} setting={s} onSave={save} />)}
+            {rows.map((s) => <OfflineRow key={s.nodeId} setting={s} label={labelOf(s.nodeId)} onSave={save} />)}
             {rows.length === 0 && (
               <TableRow><TableCell colSpan={5} className="text-muted-foreground">{t("noServersYet")}</TableCell></TableRow>
             )}
@@ -550,13 +629,13 @@ function OfflineSettings({ nodes }: { nodes: NodeView[] }) {
   );
 }
 
-function OfflineRow({ setting, onSave }: { setting: OfflineSetting; onSave: (id: string, enabled: boolean, grace: number) => void }) {
+function OfflineRow({ setting, label, onSave }: { setting: OfflineSetting; label: string; onSave: (id: string, enabled: boolean, grace: number) => void }) {
   const { t } = useI18n();
   const [enabled, setEnabled] = useState(setting.enabled);
   const [grace, setGrace] = useState(setting.graceSeconds);
   return (
     <TableRow>
-      <TableCell className="font-medium">{setting.nodeId}</TableCell>
+      <TableCell className="font-medium" title={setting.nodeId}>{label}</TableCell>
       <TableCell><Switch checked={enabled} onCheckedChange={setEnabled} /></TableCell>
       <TableCell><Input className="w-24" type="number" value={grace} onChange={(e) => setGrace(Number(e.target.value))} /></TableCell>
       <TableCell>{setting.offline ? <Badge variant="destructive">{t("stOffline")}</Badge> : <Badge variant="success">{t("stOnline")}</Badge>}</TableCell>
@@ -567,7 +646,7 @@ function OfflineRow({ setting, onSave }: { setting: OfflineSetting; onSave: (id:
 
 // ── Ping / latency tasks ────────────────────────────────────────────────────
 
-function PingTasks({ nodeIds }: { nodeIds: string[] }) {
+function PingTasks({ nodes }: { nodes: NodeView[] }) {
   const { t } = useI18n();
   const [tasks, setTasks] = useState<PingTask[]>([]);
   const [form, setForm] = useState<Partial<PingTask>>(blankTask());
@@ -581,8 +660,16 @@ function PingTasks({ nodeIds }: { nodeIds: string[] }) {
   }, []);
   useEffect(load, [load]);
 
+  const nameOf = (id: string) => nodes.find((n) => n.id === id)?.name?.trim() || id;
+  // Summarise a task's node selection for the table.
+  function serversLabel(task: PingTask): string {
+    if (!task.exclude && task.nodeIds.length === 0) return t("all");
+    const names = task.nodeIds.map(nameOf).join(", ");
+    return task.exclude ? `${t("modeExclude")}: ${names}` : names;
+  }
+
   async function submit() {
-    const res = await api("/api/ping-tasks", "POST", { ...form, nodeIds: parseList(form.nodeIds as unknown as string) });
+    const res = await api("/api/ping-tasks", "POST", { ...form });
     if (res.ok) {
       setForm(blankTask());
       setMsg("");
@@ -614,7 +701,7 @@ function PingTasks({ nodeIds }: { nodeIds: string[] }) {
                 <TableCell className="max-w-[160px] truncate text-muted-foreground">{task.target}</TableCell>
                 <TableCell>{task.type.toUpperCase()}</TableCell>
                 <TableCell>{task.intervalSeconds}s</TableCell>
-                <TableCell className="max-w-[140px] truncate text-muted-foreground">{task.nodeIds.length ? task.nodeIds.join(", ") : t("all")}</TableCell>
+                <TableCell className="max-w-[160px] truncate text-muted-foreground" title={serversLabel(task)}>{serversLabel(task)}</TableCell>
                 <TableCell><OnOff on={task.enabled} /></TableCell>
                 <TableCell>
                   <Button variant="ghost" size="sm" className="h-7 px-2 text-destructive [&_svg]:size-4" onClick={() => remove(task.id)}><Trash2 /></Button>
@@ -641,10 +728,16 @@ function PingTasks({ nodeIds }: { nodeIds: string[] }) {
             ]}
           />
           <Input className="w-20" type="number" placeholder="60" value={form.intervalSeconds ?? ""} onChange={(e) => setForm({ ...form, intervalSeconds: Number(e.target.value) })} />
-          <Input className="w-56" placeholder={t("phServersBlank")} value={(form.nodeIds as unknown as string) ?? ""} onChange={(e) => setForm({ ...form, nodeIds: e.target.value as unknown as string[] })} />
+          <NodeMultiSelect
+            className="w-56"
+            nodes={nodes}
+            value={form.nodeIds ?? []}
+            exclude={form.exclude ?? false}
+            onChange={(ids) => setForm({ ...form, nodeIds: ids })}
+            onExcludeChange={(b) => setForm({ ...form, exclude: b })}
+          />
           <Button onClick={submit}>{t("add")}</Button>
         </div>
-        {nodeIds.length > 0 && <p className="text-xs text-muted-foreground">{t("known")}{nodeIds.join(", ")}</p>}
         {msg && <p className="text-sm text-destructive">{msg}</p>}
       </CardContent>
     </Card>
@@ -668,7 +761,7 @@ function blankRule(): Partial<AlertRule> {
   return { metric: "cpu", threshold: 80, ratio: 0.8, windowMinutes: 15, enabled: true };
 }
 function blankTask(): Partial<PingTask> {
-  return { type: "tcp", intervalSeconds: 60, enabled: true };
+  return { type: "tcp", intervalSeconds: 60, nodeIds: [], exclude: false, enabled: true };
 }
 function defaultOffline(nodeId: string): OfflineSetting {
   return { nodeId, enabled: true, graceSeconds: 180, lastNotified: null, offline: false };

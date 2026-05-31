@@ -81,7 +81,11 @@ export interface PingTask {
   target: string; // host / ip[:port]
   type: PingType;
   intervalSeconds: number;
-  nodeIds: string[]; // which nodes run it; empty = all nodes
+  // Node selection. When `exclude` is false, `nodeIds` is an allowlist (empty =
+  // all nodes). When `exclude` is true, `nodeIds` is a blacklist — every node
+  // probes the target EXCEPT those listed.
+  nodeIds: string[];
+  exclude: boolean;
   enabled: boolean;
 }
 
