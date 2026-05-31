@@ -99,7 +99,7 @@ export default function LatencyView() {
           </p>
         </div>
       ) : (
-        <div className="grid grid-cols-[repeat(auto-fill,minmax(330px,1fr))] gap-4">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-[repeat(auto-fill,minmax(300px,1fr))]">
           {tasks.map((task) => {
             const rows = (byTask.get(task.id) ?? []).sort((a, b) =>
               a.nodeId.localeCompare(b.nodeId),

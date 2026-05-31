@@ -83,7 +83,7 @@ export function NodeMultiSelect({
       </button>
 
       {open && (
-        <div className="absolute left-0 z-50 mt-1.5 w-72 origin-top-left rounded-md border border-border bg-popover p-2 shadow-lg">
+        <div className="absolute left-0 z-50 mt-1.5 w-[min(18rem,calc(100vw-2rem))] origin-top-left rounded-md border border-border bg-popover p-2 shadow-lg">
           <SegmentedControl
             variant="card"
             className="w-full [&>button]:flex-1"

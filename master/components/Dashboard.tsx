@@ -130,7 +130,7 @@ export default function Dashboard({
           </p>
         </div>
 
-        <div className="flex items-center gap-3 rounded-md border border-border bg-card px-4 py-3">
+        <div className="flex w-full items-center justify-between gap-3 rounded-md border border-border bg-card px-4 py-3 sm:w-auto sm:justify-start">
           <div className="grid grid-cols-2 gap-x-5 gap-y-1 text-xs tnum">
             <Traffic dir="up" label={t("totalUp")} value={ibytes(totals.up)} />
             <Traffic dir="down" label={t("totalDown")} value={ibytes(totals.down)} />
@@ -373,19 +373,21 @@ function ServerRow({ node }: { node: NodeView }) {
   return (
     <Link
       href={`/server/${encodeURIComponent(node.opaqueId)}`}
-      className="flex items-center gap-3 rounded-md border border-border bg-card px-4 py-3 transition-colors hover:border-muted-foreground/40"
+      className="flex flex-col gap-2.5 rounded-md border border-border bg-card px-4 py-3 transition-colors hover:border-muted-foreground/40 sm:flex-row sm:items-center sm:gap-3"
     >
-      <StatusDot online={node.online} />
-      <Flag cc={node.country} />
-      <div className="min-w-0 flex-1">
-        <div className="truncate text-[15px] font-semibold" title={host.hostname}>
-          {node.name?.trim() || host.hostname}
-        </div>
-        <div className="truncate text-[11px] text-muted-foreground">
-          {node.online ? uptime(m.uptime) : t("offline")} · {host.arch}
+      <div className="flex min-w-0 items-center gap-3 sm:flex-1">
+        <StatusDot online={node.online} />
+        <Flag cc={node.country} />
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-[15px] font-semibold" title={host.hostname}>
+            {node.name?.trim() || host.hostname}
+          </div>
+          <div className="truncate text-[11px] text-muted-foreground">
+            {node.online ? uptime(m.uptime) : t("offline")} · {host.arch}
+          </div>
         </div>
       </div>
-      <div className="grid shrink-0 grid-cols-5 gap-x-3 sm:gap-x-4">
+      <div className="grid grid-cols-5 gap-x-2 sm:shrink-0 sm:gap-x-4">
         <Cell label={t("mCpu")} value={pct(m.cpuUsage)} className={pctColor(m.cpuUsage)} />
         <Cell label={t("mMem")} value={pct(m.memPercent)} className={pctColor(m.memPercent)} />
         <Cell label={t("mStorage")} value={pct(m.diskPercent)} className={pctColor(m.diskPercent)} />
@@ -404,21 +406,23 @@ function ServerListRow({ node, first }: { node: NodeView; first: boolean }) {
     <Link
       href={`/server/${encodeURIComponent(node.opaqueId)}`}
       className={cn(
-        "flex items-center gap-3 bg-card px-4 py-2.5 transition-colors hover:bg-secondary/40",
+        "flex flex-col gap-2.5 bg-card px-4 py-2.5 transition-colors hover:bg-secondary/40 sm:flex-row sm:items-center sm:gap-3",
         !first && "border-t border-border",
       )}
     >
-      <StatusDot online={node.online} />
-      <Flag cc={node.country} />
-      <div className="w-44 shrink-0">
-        <div className="truncate text-[14px] font-medium" title={host.hostname}>
-          {node.name?.trim() || host.hostname}
-        </div>
-        <div className="truncate text-[11px] text-muted-foreground">
-          {node.online ? uptime(m.uptime) : t("offline")} · {host.arch}
+      <div className="flex min-w-0 items-center gap-3 sm:w-56 sm:shrink-0">
+        <StatusDot online={node.online} />
+        <Flag cc={node.country} />
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-[14px] font-medium" title={host.hostname}>
+            {node.name?.trim() || host.hostname}
+          </div>
+          <div className="truncate text-[11px] text-muted-foreground">
+            {node.online ? uptime(m.uptime) : t("offline")} · {host.arch}
+          </div>
         </div>
       </div>
-      <div className="flex flex-1 justify-end gap-x-4 sm:gap-x-6">
+      <div className="grid grid-cols-5 gap-x-2 sm:flex sm:flex-1 sm:justify-end sm:gap-x-6">
         <Cell label={t("mCpu")} value={pct(m.cpuUsage)} className={pctColor(m.cpuUsage)} />
         <Cell label={t("mMem")} value={pct(m.memPercent)} className={pctColor(m.memPercent)} />
         <Cell label={t("mStorage")} value={pct(m.diskPercent)} className={pctColor(m.diskPercent)} />
