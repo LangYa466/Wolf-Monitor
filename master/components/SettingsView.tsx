@@ -37,7 +37,7 @@ import {
 import { flagUrl } from "@/lib/format";
 import { useI18n } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
-import { GripVertical, Trash2, RotateCw, Check, Minus, AlertTriangle, Terminal } from "lucide-react";
+import { GripVertical, Trash2, RotateCw, Check, Minus, AlertTriangle, Terminal, Pencil } from "lucide-react";
 
 // Install commands for a node (identical for every server — the node reports
 // its own hostname; reinstalling just re-runs the same token-based command).
@@ -704,7 +704,10 @@ function PingTasks({ nodes }: { nodes: NodeView[] }) {
                 <TableCell className="max-w-[160px] truncate text-muted-foreground" title={serversLabel(task)}>{serversLabel(task)}</TableCell>
                 <TableCell><OnOff on={task.enabled} /></TableCell>
                 <TableCell>
-                  <Button variant="ghost" size="sm" className="h-7 px-2 text-destructive [&_svg]:size-4" onClick={() => remove(task.id)}><Trash2 /></Button>
+                  <div className="flex justify-end gap-0.5">
+                    <Button variant="ghost" size="sm" className="h-7 px-2 [&_svg]:size-4" aria-label={t("edit")} title={t("edit")} onClick={() => setForm({ ...task })}><Pencil /></Button>
+                    <Button variant="ghost" size="sm" className="h-7 px-2 text-destructive [&_svg]:size-4" aria-label={t("clearSel")} onClick={() => remove(task.id)}><Trash2 /></Button>
+                  </div>
                 </TableCell>
               </TableRow>
             ))}
@@ -736,7 +739,16 @@ function PingTasks({ nodes }: { nodes: NodeView[] }) {
             onChange={(ids) => setForm({ ...form, nodeIds: ids })}
             onExcludeChange={(b) => setForm({ ...form, exclude: b })}
           />
-          <Button onClick={submit}>{t("add")}</Button>
+          <label className="flex cursor-pointer items-center gap-2 text-sm">
+            <Switch checked={form.enabled ?? true} onCheckedChange={(v) => setForm({ ...form, enabled: v })} />
+            {t("thOn")}
+          </label>
+          <Button onClick={submit}>{form.id ? t("save") : t("add")}</Button>
+          {form.id && (
+            <Button variant="outline" onClick={() => { setForm(blankTask()); setMsg(""); }}>
+              {t("cancel")}
+            </Button>
+          )}
         </div>
         {msg && <p className="text-sm text-destructive">{msg}</p>}
       </CardContent>
