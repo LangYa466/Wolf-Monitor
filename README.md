@@ -7,8 +7,11 @@
 ![Go](https://img.shields.io/badge/node-Go-00ADD8?logo=go&logoColor=white)
 ![Next.js](https://img.shields.io/badge/master-Next.js-000?logo=nextdotjs)
 
-Lightweight self-hosted server monitoring (探针 / probe), inspired by
+Lightweight self-hosted server monitoring, inspired by
 [komari-monitor-rs](https://github.com/GenshinMinecraft/komari-monitor-rs).
+A live overview grid plus a per-server detail page with real-time charts;
+bilingual UI (Traditional Chinese / English); login-required by default with an
+optional public guest view.
 
 **[Full documentation → the Wiki](https://github.com/LangYa466/Wolf-Monitor/wiki)** ·
 [Deploy](https://github.com/LangYa466/Wolf-Monitor/wiki/Deploy-Master) ·
@@ -22,7 +25,7 @@ Two parts:
 | Folder | What | Stack |
 |--------|------|-------|
 | [`node/`](node) | The probe agent that runs on each monitored machine. Samples **CPU, memory, disk usage + IO read/write, network**, and runs assigned **TCP/ICMP latency probes**. | Go · Windows + Linux |
-| [`master/`](master) | SSR dashboard (country flags, custom sort, email/password login) + ingestion API, **load/offline/latency alerts** with Telegram & webhook notifications. One env var (`DATABASE_URL`); all else in DB. | Next.js · WebSocket / HTTP · Vercel + CDN |
+| [`master/`](master) | SSR dashboard (overview grid + per-server charts, country flags, drag-sort, status/region filters, email/password login) + ingestion API, **load/offline/latency alerts** with Telegram & webhook notifications. One env var (`DATABASE_URL`); all else in DB. | Next.js · WebSocket / HTTP · Vercel + CDN |
 
 ## How it fits together
 
@@ -46,7 +49,7 @@ Two parts:
 ## Quick start
 
 ```sh
-# 1. master — set DATABASE_URL + NODE_TOKEN, then run
+# 1. master — set DATABASE_URL, then run
 cd master
 cp .env.example .env
 pnpm install
@@ -88,12 +91,13 @@ load average · uptime · TCP connections · process count.
 Configured from the dashboard **Settings** page, evaluated on a schedule
 (driven by node reports + self-host loop), and delivered via Telegram and/or webhook:
 
-- **负载通知 / Load alerts** — CPU/RAM/DISK ≥ threshold for a time-ratio over a
-  window (e.g. CPU ≥ 80% for 80% of 15 min), per-server or all.
-- **离线通知 / Offline alerts** — per-server, with a grace period; notifies on
-  drop and on recovery.
-- **延迟监测 / Latency monitors** — selected nodes probe a target over TCP/ICMP
-  on an interval; results shown on the `/latency` page.
+- **Load alerts** — CPU/RAM/DISK ≥ threshold for a time-ratio over a window
+  (e.g. CPU ≥ 80% for 80% of 15 min), per-server or all.
+- **Offline alerts** — per-server, with a grace period; notifies on drop and on
+  recovery.
+- **Latency monitors** — selected nodes probe a target over TCP/ICMP on an
+  interval (allowlist or blacklist of servers); results shown on the `/latency`
+  page and each server's detail Network tab.
 
 ## Star History
 
