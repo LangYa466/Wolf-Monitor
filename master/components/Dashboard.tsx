@@ -247,7 +247,15 @@ export default function Dashboard({
       )}
 
       <footer className="mt-10 text-center text-xs text-muted-foreground">
-        Wolf-Monitor · {t("updatedEvery", { n: POLL_MS / 1000 })}
+        <a
+          href="https://github.com/LangYa466/Wolf-Monitor"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="font-medium transition-colors hover:text-foreground"
+        >
+          Wolf-Monitor
+        </a>{" "}
+        · {t("updatedEvery", { n: POLL_MS / 1000 })}
       </footer>
     </div>
   );

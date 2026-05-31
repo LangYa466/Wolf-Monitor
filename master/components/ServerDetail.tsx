@@ -68,6 +68,7 @@ export default function ServerDetail({
     tasks: [],
     results: [],
   });
+  const [loadingHist, setLoadingHist] = useState(true);
 
   // Live node state (header values) — poll the list and pick out this node.
   useEffect(() => {
@@ -120,9 +121,12 @@ export default function ServerDetail({
     }
   }, [histId, range]);
 
-  // Refetch on range change; for RealTime keep polling live.
+  // Refetch on range change; for RealTime keep polling live. Show a loading
+  // skeleton until the first fetch for the current range resolves.
   useEffect(() => {
-    loadHistory();
+    setLoadingHist(true);
+    setPoints([]);
+    loadHistory().finally(() => setLoadingHist(false));
     if (range !== "realtime") return;
     const t = setInterval(loadHistory, POLL_MS);
     return () => clearInterval(t);
@@ -428,15 +432,24 @@ export default function ServerDetail({
         />
       </div>
 
-      {points.length === 0 && (
+      {/* charts — skeleton while the first fetch for this range is in flight */}
+      {loadingHist && points.length === 0 ? (
+        <div
+          className={cn(
+            "grid grid-cols-1 gap-3",
+            tab === "detail" ? "md:grid-cols-2 lg:grid-cols-3" : "md:grid-cols-2",
+          )}
+        >
+          {Array.from({ length: tab === "detail" ? 6 : 2 }).map((_, i) => (
+            <ChartSkeleton key={i} />
+          ))}
+        </div>
+      ) : points.length === 0 ? (
         <p className="mb-4 text-center text-sm text-muted-foreground">
           {t("noHistory")}
           {range === "realtime" ? t("collecting") : ""}
         </p>
-      )}
-
-      {/* charts */}
-      {tab === "detail" ? (
+      ) : tab === "detail" ? (
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-3">
           {cpuChart}
           {procChart}
@@ -456,8 +469,33 @@ export default function ServerDetail({
       )}
 
       <footer className="mt-10 text-center text-xs text-muted-foreground">
-        Wolf-Monitor · {t("updatedEvery", { n: POLL_MS / 1000 })}
+        <a
+          href="https://github.com/LangYa466/Wolf-Monitor"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="font-medium transition-colors hover:text-foreground"
+        >
+          Wolf-Monitor
+        </a>{" "}
+        · {t("updatedEvery", { n: POLL_MS / 1000 })}
       </footer>
+    </div>
+  );
+}
+
+// Pulsing placeholder shown while a chart's history is still loading.
+function ChartSkeleton() {
+  return (
+    <div className="rounded-md border border-border bg-card p-4">
+      <div className="mb-3 flex items-start justify-between gap-2">
+        <div className="h-4 w-16 animate-pulse rounded bg-muted" />
+        <div className="h-3 w-12 animate-pulse rounded bg-muted" />
+      </div>
+      <div className="h-[150px] animate-pulse rounded bg-muted/50" />
+      <div className="mt-1 flex justify-between">
+        <div className="h-2 w-6 animate-pulse rounded bg-muted" />
+        <div className="h-2 w-6 animate-pulse rounded bg-muted" />
+      </div>
     </div>
   );
 }
