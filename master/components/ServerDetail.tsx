@@ -6,7 +6,7 @@ import type { NodeView } from "@/lib/types";
 import type { HistoryPoint } from "@/lib/db";
 import {
   ago,
-  bitsRate,
+  byteRate,
   datetime,
   flagUrl,
   ibytes,
@@ -437,18 +437,18 @@ export default function ServerDetail({
               <span className="inline-flex items-center gap-3">
                 <span className="inline-flex items-center gap-1" style={{ color: "hsl(190 95% 55%)" }}>
                   <ArrowUp className="size-3" />
-                  {bitsRate(m.netUpSpeed)}
+                  {byteRate(m.netUpSpeed)}
                 </span>
                 <span className="inline-flex items-center gap-1" style={{ color: "hsl(28 95% 58%)" }}>
                   <ArrowDown className="size-3" />
-                  {bitsRate(m.netDownSpeed)}
+                  {byteRate(m.netDownSpeed)}
                 </span>
               </span>
             }
             up={netUp}
             down={netDown}
             timestamps={ts}
-            fmt={bitsRate}
+            fmt={byteRate}
           />
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
             {procChart}

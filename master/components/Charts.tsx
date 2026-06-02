@@ -414,7 +414,7 @@ export function BandwidthChart({
               className="absolute right-1 -translate-y-1/2 whitespace-nowrap"
               style={{ top: `${tk.y}%` }}
             >
-              {tk.val === 0 ? "0 b/s" : tk.val > 0 ? fmt(tk.val) : `-${fmt(-tk.val)}`}
+              {tk.val === 0 ? "0 B/s" : tk.val > 0 ? fmt(tk.val) : `-${fmt(-tk.val)}`}
             </span>
           ))}
         </div>

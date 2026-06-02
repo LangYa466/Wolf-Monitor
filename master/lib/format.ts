@@ -46,17 +46,17 @@ export function pct(n: number): string {
   return `${(n ?? 0).toFixed(1)}%`;
 }
 
-// bitsRate formats a byte-rate as a bits-per-second figure (decimal SI units),
-// the convention Grafana's "Network Bandwidth Usage" panel uses: "0 b/s",
-// "20 Mb/s", "1.5 Gb/s".
-export function bitsRate(bytesPerSec: number, digits = 0): string {
-  const bps = (bytesPerSec || 0) * 8;
-  if (bps <= 0) return "0 b/s";
-  const units = ["b", "Kb", "Mb", "Gb", "Tb"];
-  let v = bps;
+// byteRate formats a byte-per-second figure with binary KB/MB/GB units (1024-
+// based) — what the BandwidthChart axis and tooltip read. Unlike `speed()` it
+// keeps the explicit "B" suffix ("31.6 KB/s", "4.0 MB/s", "0 B/s").
+export function byteRate(bytesPerSec: number, digits = 1): string {
+  const v0 = bytesPerSec || 0;
+  if (v0 <= 0) return "0 B/s";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let v = v0;
   let i = 0;
-  while (v >= 1000 && i < units.length - 1) {
-    v /= 1000;
+  while (v >= 1024 && i < units.length - 1) {
+    v /= 1024;
     i++;
   }
   const d = i === 0 ? 0 : v >= 100 ? 0 : digits;
