@@ -33,7 +33,7 @@ function rid(prefix: string): string {
 export async function listAlertRules(): Promise<AlertRule[]> {
   await ensureSchema();
   const { rows } = await getPool().query(
-    `SELECT id, name, metric, threshold, ratio, window_minutes, targets, enabled
+    `SELECT id, name, metric, threshold, ratio, window_minutes, targets, exclude, enabled
        FROM alert_rules ORDER BY name`
   );
   return rows.map((r) => ({
@@ -44,6 +44,7 @@ export async function listAlertRules(): Promise<AlertRule[]> {
     ratio: r.ratio,
     windowMinutes: r.window_minutes,
     targets: r.targets ?? [],
+    exclude: r.exclude ?? false,
     enabled: r.enabled,
   }));
 }
@@ -61,15 +62,16 @@ export async function upsertAlertRule(
     ratio: clamp(rule.ratio ?? 0.8, 0, 1),
     windowMinutes: Math.max(1, Math.round(rule.windowMinutes ?? 15)),
     targets: rule.targets ?? [],
+    exclude: rule.exclude ?? false,
     enabled: rule.enabled ?? true,
   };
   await getPool().query(
-    `INSERT INTO alert_rules (id, name, metric, threshold, ratio, window_minutes, targets, enabled)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+    `INSERT INTO alert_rules (id, name, metric, threshold, ratio, window_minutes, targets, exclude, enabled)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
      ON CONFLICT (id) DO UPDATE SET
        name=EXCLUDED.name, metric=EXCLUDED.metric, threshold=EXCLUDED.threshold,
        ratio=EXCLUDED.ratio, window_minutes=EXCLUDED.window_minutes,
-       targets=EXCLUDED.targets, enabled=EXCLUDED.enabled`,
+       targets=EXCLUDED.targets, exclude=EXCLUDED.exclude, enabled=EXCLUDED.enabled`,
     [
       row.id,
       row.name,
@@ -78,6 +80,7 @@ export async function upsertAlertRule(
       row.ratio,
       row.windowMinutes,
       JSON.stringify(row.targets),
+      row.exclude,
       row.enabled,
     ]
   );
@@ -329,9 +332,13 @@ async function evaluateLoadAlerts(
   for (const rule of rules) {
     if (!rule.enabled) continue;
     const col = METRIC_COLUMN[rule.metric];
-    const targets =
-      rule.targets.length > 0
-        ? nodes.filter((n) => rule.targets.includes(n.id))
+    // Allowlist (exclude=false): match nodes in `targets`, or all if empty.
+    // Blacklist (exclude=true): match every node EXCEPT those in `targets`.
+    const targetSet = new Set(rule.targets);
+    const targets = rule.exclude
+      ? nodes.filter((n) => !targetSet.has(n.id))
+      : rule.targets.length > 0
+        ? nodes.filter((n) => targetSet.has(n.id))
         : nodes;
     const since = now - rule.windowMinutes * 60 * 1000;
 

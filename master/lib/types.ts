@@ -59,6 +59,9 @@ export interface AlertRule {
   ratio: number; // 0..1, e.g. 0.8
   windowMinutes: number; // e.g. 15
   targets: string[]; // node ids; empty = all nodes
+  // When true, `targets` is a blacklist (rule applies to all nodes EXCEPT
+  // those listed); when false (default), it's an allowlist.
+  exclude: boolean;
   enabled: boolean;
 }
 

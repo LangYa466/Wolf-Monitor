@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import type {
   AlertMetric,
   AlertRule,
@@ -106,9 +107,22 @@ async function api(url: string, method: string, body?: unknown): Promise<Respons
 
 export default function SettingsView() {
   const { t } = useI18n();
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
   const [ready, setReady] = useState(false);
   const [nodes, setNodes] = useState<NodeView[]>([]);
-  const [tab, setTab] = useState<SettingsTab>("servers");
+
+  // Tab lives in the URL (?tab=alerts) so it's bookmarkable, refresh-stable,
+  // and back/forward-aware. Falls back to localStorage (legacy storage) then
+  // to "servers" on first visit.
+  const urlTab = searchParams.get("tab") as SettingsTab | null;
+  const tab: SettingsTab =
+    urlTab && TABS.some((x) => x.value === urlTab)
+      ? urlTab
+      : (typeof window !== "undefined"
+          ? (localStorage.getItem(TAB_KEY) as SettingsTab | null)
+          : null) ?? "servers";
 
   useEffect(() => {
     fetch("/api/auth/status")
@@ -125,21 +139,32 @@ export default function SettingsView() {
       .catch(() => {});
   }, []);
 
+  // On first paint, if a legacy localStorage tab is present and no ?tab= is in
+  // the URL, push it into the URL so the bar reflects state. Use replaceState
+  // to avoid adding a back-button entry for the migration.
   useEffect(() => {
-    const stored = localStorage.getItem(TAB_KEY) as SettingsTab | null;
-    if (stored && TABS.some((x) => x.value === stored)) setTab(stored);
+    if (!urlTab) {
+      const stored =
+        typeof window !== "undefined"
+          ? (localStorage.getItem(TAB_KEY) as SettingsTab | null)
+          : null;
+      if (stored && TABS.some((x) => x.value === stored) && stored !== "servers") {
+        router.replace(`${pathname}?tab=${stored}`);
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   function changeTab(v: SettingsTab) {
-    setTab(v);
     localStorage.setItem(TAB_KEY, v);
+    const params = new URLSearchParams(searchParams.toString());
+    params.set("tab", v);
+    router.replace(`${pathname}?${params.toString()}`);
   }
 
   if (!ready) {
     return <p className="py-20 text-center text-muted-foreground">{t("loading")}</p>;
   }
-
-  const nodeIds = nodes.map((n) => n.id);
 
   return (
     <div className="space-y-5">
@@ -164,7 +189,7 @@ export default function SettingsView() {
       <div key={tab}>
         {tab === "servers" && <ServersSection nodes={nodes} />}
         {tab === "notify" && <NotificationSettings />}
-        {tab === "alerts" && <AlertRules nodeIds={nodeIds} />}
+        {tab === "alerts" && <AlertRules nodes={nodes} />}
         {tab === "offline" && <OfflineSettings nodes={nodes} />}
         {tab === "ping" && <PingTasks nodes={nodes} />}
       </div>
@@ -617,7 +642,7 @@ function NotificationSettings() {
 
 // ── Load alert rules ────────────────────────────────────────────────────────
 
-function AlertRules({ nodeIds }: { nodeIds: string[] }) {
+function AlertRules({ nodes }: { nodes: NodeView[] }) {
   const { t } = useI18n();
   const [rules, setRules] = useState<AlertRule[]>([]);
   const [form, setForm] = useState<Partial<AlertRule>>(blankRule());
@@ -632,7 +657,7 @@ function AlertRules({ nodeIds }: { nodeIds: string[] }) {
   useEffect(load, [load]);
 
   async function submit() {
-    const res = await api("/api/alerts", "POST", { ...form, targets: parseList(form.targets as unknown as string) });
+    const res = await api("/api/alerts", "POST", form);
     if (res.ok) {
       setForm(blankRule());
       setMsg("");
@@ -642,6 +667,13 @@ function AlertRules({ nodeIds }: { nodeIds: string[] }) {
   async function remove(id: string) {
     if ((await api(`/api/alerts/${id}`, "DELETE")).ok) load();
   }
+  // Mirror PingTasks' label: "X selected" / "X excluded" / "All servers".
+  const targetsLabel = (r: AlertRule): string => {
+    if (!r.targets || r.targets.length === 0) return t("all");
+    return r.exclude
+      ? t("selExclude", { n: r.targets.length })
+      : t("selCount", { n: r.targets.length });
+  };
 
   return (
     <Card>
@@ -666,7 +698,7 @@ function AlertRules({ nodeIds }: { nodeIds: string[] }) {
                 <TableCell>{r.threshold}%</TableCell>
                 <TableCell>{(r.ratio * 100).toFixed(0)}%</TableCell>
                 <TableCell>{r.windowMinutes}m</TableCell>
-                <TableCell className="max-w-[160px] truncate text-muted-foreground">{r.targets.length ? r.targets.join(", ") : t("all")}</TableCell>
+                <TableCell className="max-w-[160px] truncate text-muted-foreground" title={r.targets.join(", ")}>{targetsLabel(r)}</TableCell>
                 <TableCell><OnOff on={r.enabled} /></TableCell>
                 <TableCell>
                   <Button variant="ghost" size="sm" className="h-7 px-2 text-destructive [&_svg]:size-4" onClick={() => remove(r.id)}><Trash2 /></Button>
@@ -695,10 +727,16 @@ function AlertRules({ nodeIds }: { nodeIds: string[] }) {
           <Input className="w-20" type="number" placeholder="80" value={form.threshold ?? ""} onChange={(e) => setForm({ ...form, threshold: Number(e.target.value) })} />
           <Input className="w-20" type="number" step="0.05" placeholder="0.8" value={form.ratio ?? ""} onChange={(e) => setForm({ ...form, ratio: Number(e.target.value) })} />
           <Input className="w-20" type="number" placeholder="15" value={form.windowMinutes ?? ""} onChange={(e) => setForm({ ...form, windowMinutes: Number(e.target.value) })} />
-          <Input className="w-56" placeholder={t("phServersBlank")} value={(form.targets as unknown as string) ?? ""} onChange={(e) => setForm({ ...form, targets: e.target.value as unknown as string[] })} />
+          <NodeMultiSelect
+            className="w-56"
+            nodes={nodes}
+            value={form.targets ?? []}
+            exclude={form.exclude ?? false}
+            onChange={(ids) => setForm({ ...form, targets: ids })}
+            onExcludeChange={(b) => setForm({ ...form, exclude: b })}
+          />
           <Button onClick={submit}>{t("add")}</Button>
         </div>
-        {nodeIds.length > 0 && <p className="text-xs text-muted-foreground">{t("known")}{nodeIds.join(", ")}</p>}
         {msg && <p className="text-sm text-destructive">{msg}</p>}
       </CardContent>
     </Card>
@@ -903,8 +941,4 @@ function blankTask(): Partial<PingTask> {
 }
 function defaultOffline(nodeId: string): OfflineSetting {
   return { nodeId, enabled: true, graceSeconds: 180, lastNotified: null, offline: false };
-}
-function parseList(v: string | undefined): string[] {
-  if (!v) return [];
-  return String(v).split(",").map((s) => s.trim()).filter(Boolean);
 }

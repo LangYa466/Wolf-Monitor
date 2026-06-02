@@ -180,6 +180,9 @@ ALTER TABLE nodes ADD COLUMN IF NOT EXISTS name TEXT;
 -- (all nodes probe the target except those listed) instead of an allowlist.
 ALTER TABLE ping_tasks ADD COLUMN IF NOT EXISTS exclude BOOLEAN NOT NULL DEFAULT FALSE;
 
+-- Same allowlist/blacklist switch on alert rules' targets column.
+ALTER TABLE alert_rules ADD COLUMN IF NOT EXISTS exclude BOOLEAN NOT NULL DEFAULT FALSE;
+
 -- Per-node admission tokens. Each node has its own token (the "key" the install
 -- script embeds). An unbound token (node_id IS NULL) is reserved for a future
 -- node and binds to the hostname on its first /api/report. Once bound, only
