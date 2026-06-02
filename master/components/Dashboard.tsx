@@ -283,7 +283,16 @@ function Traffic({
     <div className="flex items-center gap-1.5">
       <Arrow className={cn("size-3", dir === "up" ? "text-primary" : "text-success")} />
       <span className="text-muted-foreground">{label}</span>
-      <span className={cn("ml-auto font-semibold", live && "text-foreground")}>{value}</span>
+      {/* Fixed-width right-aligned value keeps the two-column layout from
+          shifting as totals tick up. */}
+      <span
+        className={cn(
+          "ml-auto min-w-[84px] text-right font-semibold tabular-nums",
+          live && "text-foreground",
+        )}
+      >
+        {value}
+      </span>
     </div>
   );
 }
@@ -357,11 +366,15 @@ function pctColor(p: number): string {
 }
 
 // Compact metric cell: tiny label above a value.
+// Each metric Cell is a fixed-width column (~68px) so labels and values line
+// up across every row regardless of value length ("4.0%" vs "100.0%",
+// "1.57K/s" vs "195.60K/s"). Without the fixed width grids/flex auto-size to
+// content and the columns jitter row-by-row.
 function Cell({ label, value, className }: { label: string; value: string; className?: string }) {
   return (
-    <div className="min-w-0 text-center">
+    <div className="w-[68px] shrink-0 text-center">
       <div className="text-[10px] uppercase tracking-wide text-muted-foreground">{label}</div>
-      <div className={cn("truncate text-[13px] font-semibold tnum", className)}>{value}</div>
+      <div className={cn("truncate text-[13px] font-semibold tabular-nums", className)}>{value}</div>
     </div>
   );
 }
@@ -387,7 +400,7 @@ function ServerRow({ node }: { node: NodeView }) {
           </div>
         </div>
       </div>
-      <div className="grid grid-cols-5 gap-x-2 sm:shrink-0 sm:gap-x-4">
+      <div className="flex gap-x-2 sm:shrink-0 sm:gap-x-4">
         <Cell label={t("mCpu")} value={pct(m.cpuUsage)} className={pctColor(m.cpuUsage)} />
         <Cell label={t("mMem")} value={pct(m.memPercent)} className={pctColor(m.memPercent)} />
         <Cell label={t("mStorage")} value={pct(m.diskPercent)} className={pctColor(m.diskPercent)} />
@@ -422,7 +435,7 @@ function ServerListRow({ node, first }: { node: NodeView; first: boolean }) {
           </div>
         </div>
       </div>
-      <div className="grid grid-cols-5 gap-x-2 sm:flex sm:flex-1 sm:justify-end sm:gap-x-6">
+      <div className="flex gap-x-2 sm:flex-1 sm:justify-end sm:gap-x-6">
         <Cell label={t("mCpu")} value={pct(m.cpuUsage)} className={pctColor(m.cpuUsage)} />
         <Cell label={t("mMem")} value={pct(m.memPercent)} className={pctColor(m.memPercent)} />
         <Cell label={t("mStorage")} value={pct(m.diskPercent)} className={pctColor(m.diskPercent)} />
