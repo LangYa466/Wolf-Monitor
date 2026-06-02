@@ -283,75 +283,109 @@ export function BandwidthChart({
   height?: number;
 }) {
   const plotRef = React.useRef<HTMLDivElement>(null);
+  const rafRef = React.useRef<number | null>(null);
+  const pendingX = React.useRef<number | null>(null);
   const [idx, setIdx] = React.useState<number | null>(null);
-  const n = Math.max(up.length, down.length);
-
-  const upPeak = up.length ? Math.max(...up) : 0;
-  const downPeak = down.length ? Math.max(...down) : 0;
-  const upMax = niceBound(Math.max(1, upPeak));
-  const downMax = niceBound(Math.max(1, downPeak));
-
-  const W = 100;
-  const H = 100;
-  // Split the H=100 viewBox between up (top) and down (bottom) proportional
-  // to each side's nice bound, so the bars on the bigger side aren't crushed.
-  const total = upMax + downMax;
-  const mid = (upMax / total) * H;
 
   // Grafana defaults: cool color for transmitted (up), warm for received (down).
   const upColor = "hsl(190 95% 55%)"; // cyan
   const downColor = "hsl(28 95% 58%)"; // orange
 
-  const pick = React.useCallback(
-    (clientX: number) => {
+  const W = 100;
+  const H = 100;
+
+  // Everything that depends only on the data (not on hover idx) — bar paths,
+  // axis bounds, gridlines, time ticks — is computed once per data change.
+  // Critical: 30d range can hand us 2000 samples; collapsing 4000 individual
+  // <line> elements into two <path>s is what keeps hover from stuttering.
+  const geom = React.useMemo(() => {
+    const n = Math.max(up.length, down.length);
+    let upPeak = 0;
+    let downPeak = 0;
+    for (let i = 0; i < up.length; i++) if (up[i] > upPeak) upPeak = up[i];
+    for (let i = 0; i < down.length; i++) if (down[i] > downPeak) downPeak = down[i];
+    const upMax = niceBound(Math.max(1, upPeak));
+    const downMax = niceBound(Math.max(1, downPeak));
+    const total = upMax + downMax;
+    const mid = (upMax / total) * H;
+
+    const xFor = (i: number) => (n <= 1 ? W / 2 : (i / (n - 1)) * W);
+    const yUp = (v: number) => mid - (clamp(v, 0, upMax) / upMax) * mid;
+    const yDown = (v: number) => mid + (clamp(v, 0, downMax) / downMax) * (H - mid);
+
+    // Each bar is a sub-path "M x mid V y" — one big path string per side, two
+    // SVG nodes total, instead of one node per sample.
+    let upPath = "";
+    for (let i = 0; i < up.length; i++) {
+      const v = up[i];
+      if (v > 0) {
+        const x = xFor(i).toFixed(3);
+        const y = yUp(v).toFixed(3);
+        upPath += `M${x} ${mid.toFixed(3)}V${y}`;
+      }
+    }
+    let downPath = "";
+    for (let i = 0; i < down.length; i++) {
+      const v = down[i];
+      if (v > 0) {
+        const x = xFor(i).toFixed(3);
+        const y = yDown(v).toFixed(3);
+        downPath += `M${x} ${mid.toFixed(3)}V${y}`;
+      }
+    }
+
+    const yStep = niceStep(total / 6);
+    const yTicks: { val: number; y: number }[] = [{ val: 0, y: mid }];
+    for (let v = yStep; v <= upMax + 0.0001; v += yStep) {
+      yTicks.push({ val: v, y: yUp(v) });
+    }
+    for (let v = yStep; v <= downMax + 0.0001; v += yStep) {
+      yTicks.push({ val: -v, y: yDown(v) });
+    }
+
+    const xTicks: { i: number; label: string }[] = [];
+    if (timestamps && timestamps.length > 0 && n > 0) {
+      const last = Math.min(n, timestamps.length);
+      const count = Math.min(8, Math.max(2, last));
+      for (let k = 0; k < count; k++) {
+        const i = Math.round((k / (count - 1)) * (last - 1));
+        const t = timestamps[i];
+        if (t == null) continue;
+        const d = new Date(t);
+        const p = (x: number) => String(x).padStart(2, "0");
+        xTicks.push({ i, label: `${p(d.getHours())}:${p(d.getMinutes())}` });
+      }
+    }
+
+    return { n, upMax, downMax, mid, upPath, downPath, yTicks, xTicks, yUp, yDown };
+  }, [up, down, timestamps]);
+
+  const { n, mid, upPath, downPath, yTicks, xTicks, yUp, yDown } = geom;
+
+  // Hover handler — coalesces successive mousemove samples onto the next
+  // animation frame so we re-render at most ~60 Hz even under a fast drag.
+  const pick = React.useCallback((clientX: number) => {
+    pendingX.current = clientX;
+    if (rafRef.current != null) return;
+    rafRef.current = requestAnimationFrame(() => {
+      rafRef.current = null;
+      const x = pendingX.current;
+      pendingX.current = null;
       const el = plotRef.current;
-      if (!el || n === 0) return;
+      if (x == null || !el || n === 0) return;
       const rect = el.getBoundingClientRect();
-      const rel = clamp((clientX - rect.left) / rect.width, 0, 1);
+      const rel = clamp((x - rect.left) / rect.width, 0, 1);
       setIdx(Math.round(rel * (n - 1)));
-    },
-    [n],
-  );
+    });
+  }, [n]);
+
+  React.useEffect(() => () => {
+    if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
+  }, []);
 
   const xPct = idx == null ? 0 : n > 1 ? (idx / (n - 1)) * 100 : 50;
   const tipPct = clamp(xPct, 14, 86);
   const showTip = idx != null && n > 0;
-
-  function xFor(i: number): number {
-    if (n <= 1) return W / 2;
-    return (i / (n - 1)) * W;
-  }
-  function yUp(v: number): number {
-    return mid - (clamp(v, 0, upMax) / upMax) * mid;
-  }
-  function yDown(v: number): number {
-    return mid + (clamp(v, 0, downMax) / downMax) * (H - mid);
-  }
-
-  // Y axis: pick a "nice" step roughly producing 6 ticks across the total span.
-  const yStep = niceStep(total / 6);
-  const yTicks: { val: number; y: number }[] = [{ val: 0, y: mid }];
-  for (let v = yStep; v <= upMax + 0.0001; v += yStep) {
-    yTicks.push({ val: v, y: yUp(v) });
-  }
-  for (let v = yStep; v <= downMax + 0.0001; v += yStep) {
-    yTicks.push({ val: -v, y: yDown(v) });
-  }
-
-  // X axis time ticks — ~8 across.
-  const xTicks: { i: number; label: string }[] = [];
-  if (timestamps && timestamps.length > 0 && n > 0) {
-    const last = Math.min(n, timestamps.length);
-    const count = Math.min(8, Math.max(2, last));
-    for (let k = 0; k < count; k++) {
-      const i = Math.round((k / (count - 1)) * (last - 1));
-      const t = timestamps[i];
-      if (t == null) continue;
-      const d = new Date(t);
-      const p = (x: number) => String(x).padStart(2, "0");
-      xTicks.push({ i, label: `${p(d.getHours())}:${p(d.getMinutes())}` });
-    }
-  }
 
   return (
     <div
@@ -420,40 +454,30 @@ export function BandwidthChart({
             );
           })}
 
-          {/* upload bars (positive — above the zero line) */}
-          {up.map((v, i) =>
-            v > 0 ? (
-              <line
-                key={`u${i}`}
-                x1={xFor(i)}
-                x2={xFor(i)}
-                y1={mid}
-                y2={yUp(v)}
-                stroke={upColor}
-                strokeWidth={0.9}
-                strokeLinecap="butt"
-                vectorEffect="non-scaling-stroke"
-                opacity={0.95}
-              />
-            ) : null,
+          {/* All upload bars collapsed into one path — orders-of-magnitude
+              cheaper to diff/render than per-sample <line> elements when the
+              30-day range hands us thousands of points. */}
+          {upPath && (
+            <path
+              d={upPath}
+              fill="none"
+              stroke={upColor}
+              strokeWidth={0.9}
+              strokeLinecap="butt"
+              vectorEffect="non-scaling-stroke"
+              opacity={0.95}
+            />
           )}
-
-          {/* download bars (drawn below the zero line) */}
-          {down.map((v, i) =>
-            v > 0 ? (
-              <line
-                key={`d${i}`}
-                x1={xFor(i)}
-                x2={xFor(i)}
-                y1={mid}
-                y2={yDown(v)}
-                stroke={downColor}
-                strokeWidth={0.9}
-                strokeLinecap="butt"
-                vectorEffect="non-scaling-stroke"
-                opacity={0.95}
-              />
-            ) : null,
+          {downPath && (
+            <path
+              d={downPath}
+              fill="none"
+              stroke={downColor}
+              strokeWidth={0.9}
+              strokeLinecap="butt"
+              vectorEffect="non-scaling-stroke"
+              opacity={0.95}
+            />
           )}
         </svg>
 
