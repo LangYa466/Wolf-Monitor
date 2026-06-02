@@ -1,15 +1,26 @@
 name: ci
 
-# Build both components on every PR (and pushes to main) so broken builds are
-# caught before merge.
+# Only guards the Go agent — `master/` is already built by Vercel preview on
+# every PR / push, so duplicating it here just burns Actions minutes.
 on:
   pull_request:
     branches: [main]
+    paths:
+      - "node/**"
+      - ".github/workflows/ci.yml"
   push:
     branches: [main]
+    paths:
+      - "node/**"
+      - ".github/workflows/ci.yml"
 
 permissions:
   contents: read
+
+# Cancel in-flight runs on the same ref when a newer commit lands.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   node:
@@ -26,20 +37,3 @@ jobs:
         run: |
           go vet ./...
           go build ./...
-
-  master:
-    name: master · next build
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v5
-      - run: corepack enable
-      - uses: actions/setup-node@v5
-        with:
-          node-version: "22"
-      - name: install + build
-        working-directory: master
-        env:
-          NEXT_TELEMETRY_DISABLED: "1"
-        run: |
-          pnpm install --frozen-lockfile
-          pnpm build
