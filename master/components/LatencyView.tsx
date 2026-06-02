@@ -17,6 +17,10 @@ export default function LatencyView() {
   const [results, setResults] = useState<PingResult[]>([]);
   const [names, setNames] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
+  // Until the first poll completes, render the loading skeleton — without
+  // this the empty default state ("no monitors, go to /settings") flashes for
+  // the brief moment between mount and the first /api/ping-results response.
+  const [polled, setPolled] = useState(false);
 
   useEffect(() => {
     let alive = true;
@@ -49,6 +53,8 @@ export default function LatencyView() {
         }
       } catch (e) {
         if (alive) setError(e instanceof Error ? e.message : "fetch failed");
+      } finally {
+        if (alive) setPolled(true);
       }
     }
     poll();
@@ -82,13 +88,25 @@ export default function LatencyView() {
         </div>
       </header>
 
-      {error && (
+      {error && polled && (
         <Card className="mb-4 border-destructive/60">
           <CardContent className="flex items-center gap-2 p-4 text-sm text-destructive"><AlertTriangle className="size-4 shrink-0" /> {error}</CardContent>
         </Card>
       )}
 
-      {tasks.length === 0 ? (
+      {!polled ? (
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-[repeat(auto-fill,minmax(300px,1fr))]">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <Card key={i}>
+              <CardContent className="space-y-2 p-4">
+                <div className="h-4 w-32 animate-pulse rounded bg-muted" />
+                <div className="h-3 w-48 animate-pulse rounded bg-muted/70" />
+                <div className="h-16 w-full animate-pulse rounded bg-muted/50" />
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      ) : tasks.length === 0 ? (
         <div className="py-20 text-center text-muted-foreground">
           <p className="mb-2">{t("noMonitorsYet")}</p>
           <p className="text-sm">
