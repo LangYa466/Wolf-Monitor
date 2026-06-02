@@ -227,6 +227,7 @@ function ServersSection({
   const [ghProxyUrl, setGhProxyUrl] = useState("");
   const [nodeTokens, setNodeTokens] = useState<Record<string, string>>({});
   const [unboundTokens, setUnboundTokens] = useState<Array<{ token: string; createdAt: number }>>([]);
+  const [databaseUrl, setDatabaseUrl] = useState("");
   const [order, setOrder] = useState<NodeView[]>(nodes);
   const [dragId, setDragId] = useState<string | null>(null);
   const [names, setNames] = useState<Record<string, string>>({});
@@ -250,6 +251,7 @@ function ServersSection({
         setGhProxyUrl(d.ghProxyUrl ?? "");
         setNodeTokens(d.nodeTokens ?? {});
         setUnboundTokens(d.unboundTokens ?? []);
+        setDatabaseUrl(d.databaseUrl ?? "");
         setCipherKey(d.idCipherKey ?? "");
         setCipherTweak(d.idCipherTweak ?? "");
       })
@@ -448,6 +450,33 @@ function ServersSection({
               </Button>
             </div>
           )}
+        </div>
+
+        <div className="space-y-2 rounded-md border border-border bg-muted/40 p-3">
+          <div>
+            <Label className="text-sm text-foreground">{t("dbUrl")}</Label>
+            <p className="mt-1 text-xs text-muted-foreground">{t("dbUrlDesc")}</p>
+          </div>
+          <button
+            type="button"
+            title={t("clickToCopy")}
+            onClick={async () => {
+              if (!databaseUrl) return;
+              try {
+                await navigator.clipboard.writeText(databaseUrl);
+                setMsg(t("msgCopied"));
+              } catch {
+                setMsg(t("msgFailed"));
+              }
+            }}
+            className="group block w-full cursor-copy break-all rounded border border-border bg-background px-2.5 py-2 text-left font-mono text-xs"
+          >
+            {/* Blurred by default; hover/focus reveals. The text stays
+                selectable so admins can manually highlight if needed. */}
+            <span className="select-text blur-sm transition-[filter] duration-150 group-hover:blur-0 group-focus:blur-0">
+              {databaseUrl || "—"}
+            </span>
+          </button>
         </div>
 
         <Field label={t("ipinfoLabel")}>

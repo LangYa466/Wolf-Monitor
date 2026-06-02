@@ -34,6 +34,11 @@ interface SettingsResponse {
   // Pre-created tokens not yet bound to any node — handed to fresh servers
   // before they've first reported.
   unboundTokens: Array<{ token: string; createdAt: number }>;
+  // The DATABASE_URL the worker is using right now, so the admin can verify
+  // which DB is connected from the UI. Sensitive (contains credentials);
+  // surfaced ONLY in the admin-only settings endpoint and blurred client-side
+  // until hover.
+  databaseUrl: string;
 }
 
 async function buildResponse(): Promise<SettingsResponse> {
@@ -65,6 +70,7 @@ async function buildResponse(): Promise<SettingsResponse> {
     idCipherTweak: idCipher.tweak,
     nodeTokens,
     unboundTokens,
+    databaseUrl: process.env.DATABASE_URL ?? "",
   };
 }
 
