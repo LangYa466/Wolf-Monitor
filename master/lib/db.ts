@@ -179,6 +179,17 @@ ALTER TABLE nodes ADD COLUMN IF NOT EXISTS name TEXT;
 -- Latency task node selection mode: when true, node_ids is a blacklist
 -- (all nodes probe the target except those listed) instead of an allowlist.
 ALTER TABLE ping_tasks ADD COLUMN IF NOT EXISTS exclude BOOLEAN NOT NULL DEFAULT FALSE;
+
+-- Per-node admission tokens. Each node has its own token (the "key" the install
+-- script embeds). An unbound token (node_id IS NULL) is reserved for a future
+-- node and binds to the hostname on its first /api/report. Once bound, only
+-- that token authorizes reports for that node.
+CREATE TABLE IF NOT EXISTS node_tokens (
+  token      TEXT PRIMARY KEY,
+  node_id    TEXT,
+  created_at BIGINT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS node_tokens_node ON node_tokens (node_id);
 `;
 
 // Generic key/value settings (notification config, etc.).

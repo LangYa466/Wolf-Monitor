@@ -104,25 +104,153 @@ export async function deleteSession(token: string): Promise<void> {
   await getPool().query(`DELETE FROM sessions WHERE token = $1`, [token]);
 }
 
-// ── node ingestion token (DB-backed) ────────────────────────────────────────
+// ── node ingestion tokens (DB-backed) ───────────────────────────────────────
+//
+// Token model:
+//  • Each node has its OWN token (the "key" embedded in its install command).
+//  • An unbound token (node_id IS NULL) is generated in advance for a new
+//    server and binds to the reporting hostname on first /api/report.
+//  • Legacy `app_settings.nodeToken` is a shared admission token kept as a
+//    fallback for migration so existing nodes don't drop off mid-rollout.
+//    Remove it from app_settings once every node is reinstalled.
 
-export async function getNodeToken(): Promise<string | null> {
+export async function getLegacyNodeToken(): Promise<string | null> {
   return getSetting<string>("nodeToken");
 }
 
 export async function ensureNodeToken(): Promise<string> {
-  const existing = await getNodeToken();
+  const existing = await getLegacyNodeToken();
   if (existing) return existing;
   const token = randomBytes(18).toString("base64url");
   await setSetting("nodeToken", token);
   return token;
 }
 
-export async function nodeTokenValid(provided: string | null | undefined): Promise<boolean> {
-  const expected = await getNodeToken();
-  if (!expected) return false; // not configured yet → reject until setup
+// Generate a token already bound to a node, or return the existing one. Used
+// by the admin UI to surface a copy-paste install command for known nodes.
+export async function ensureTokenForNode(hostname: string): Promise<string> {
+  const pool = getPool();
+  const existing = await pool.query<{ token: string }>(
+    `SELECT token FROM node_tokens WHERE node_id = $1 ORDER BY created_at DESC LIMIT 1`,
+    [hostname],
+  );
+  if (existing.rows.length) return existing.rows[0].token;
+  const token = randomBytes(18).toString("base64url");
+  await pool.query(
+    `INSERT INTO node_tokens (token, node_id, created_at) VALUES ($1, $2, $3)`,
+    [token, hostname, Date.now()],
+  );
+  return token;
+}
+
+// Drop and regenerate the token for a node — the admin must reinstall the
+// service on that host afterwards for it to keep reporting.
+export async function rotateTokenForNode(hostname: string): Promise<string> {
+  await getPool().query(`DELETE FROM node_tokens WHERE node_id = $1`, [hostname]);
+  return ensureTokenForNode(hostname);
+}
+
+// Create a token that isn't yet bound to any node. The first /api/report
+// presenting this token binds it to that report's hostname.
+export async function createUnboundToken(): Promise<string> {
+  const token = randomBytes(18).toString("base64url");
+  await getPool().query(
+    `INSERT INTO node_tokens (token, node_id, created_at) VALUES ($1, NULL, $2)`,
+    [token, Date.now()],
+  );
+  return token;
+}
+
+export async function listNodeTokens(): Promise<
+  Array<{ token: string; nodeId: string | null; createdAt: number }>
+> {
+  const { rows } = await getPool().query<{
+    token: string;
+    node_id: string | null;
+    created_at: string;
+  }>(`SELECT token, node_id, created_at FROM node_tokens ORDER BY created_at DESC`);
+  return rows.map((r) => ({
+    token: r.token,
+    nodeId: r.node_id,
+    createdAt: Number(r.created_at),
+  }));
+}
+
+export async function deleteNodeToken(token: string): Promise<void> {
+  await getPool().query(`DELETE FROM node_tokens WHERE token = $1`, [token]);
+}
+
+// authorizeReport: gate for POST /api/report. Looks up the provided token in
+// node_tokens; binds an unbound row to `hostname` on first use. Falls back to
+// the legacy shared token (so unmigrated nodes keep reporting). Returns true
+// if the report should be accepted.
+export async function authorizeReport(
+  provided: string | null | undefined,
+  hostname: string,
+): Promise<boolean> {
   if (!provided) return false;
+  const pool = getPool();
+  const { rows } = await pool.query<{ node_id: string | null }>(
+    `SELECT node_id FROM node_tokens WHERE token = $1`,
+    [provided],
+  );
+  if (rows.length) {
+    const bound = rows[0].node_id;
+    if (bound === null) {
+      await pool.query(
+        `UPDATE node_tokens SET node_id = $1 WHERE token = $2 AND node_id IS NULL`,
+        [hostname, provided],
+      );
+      return true;
+    }
+    return bound === hostname;
+  }
+  return legacyTokenMatch(provided);
+}
+
+// authorizeForHost: gate for endpoints that already know which node is calling
+// (e.g. /api/tasks?host=...). Doesn't bind. An unbound token is rejected here
+// — it has to bind via /api/report first.
+export async function authorizeForHost(
+  provided: string | null | undefined,
+  hostname: string,
+): Promise<boolean> {
+  if (!provided) return false;
+  const { rows } = await getPool().query<{ node_id: string | null }>(
+    `SELECT node_id FROM node_tokens WHERE token = $1`,
+    [provided],
+  );
+  if (rows.length) return rows[0].node_id === hostname;
+  return legacyTokenMatch(provided);
+}
+
+// authorizeAnyNode: gate for endpoints that don't pin a specific host (e.g.
+// /api/ping where each batch carries its own nodeId per row). Accepts any
+// bound or legacy token; rejects unbound (which has no node yet).
+export async function authorizeAnyNode(
+  provided: string | null | undefined,
+): Promise<boolean> {
+  if (!provided) return false;
+  const { rows } = await getPool().query<{ node_id: string | null }>(
+    `SELECT node_id FROM node_tokens WHERE token = $1`,
+    [provided],
+  );
+  if (rows.length) return rows[0].node_id !== null;
+  return legacyTokenMatch(provided);
+}
+
+async function legacyTokenMatch(provided: string): Promise<boolean> {
+  const expected = await getLegacyNodeToken();
+  if (!expected) return false;
   return safeEqualStr(provided, expected);
+}
+
+// Back-compat: keep the old `nodeTokenValid` symbol as a hostname-agnostic
+// validator (legacy-only) so any incidental imports still type-check. Prefer
+// authorizeReport/authorizeForHost/authorizeAnyNode in new code.
+export async function nodeTokenValid(provided: string | null | undefined): Promise<boolean> {
+  if (!provided) return false;
+  return authorizeAnyNode(provided);
 }
 
 export function tokenFromHeader(header: string | null): string | null {

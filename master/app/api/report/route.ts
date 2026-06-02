@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse, after } from "next/server";
 import { getNodeNet, saveReport } from "@/lib/db";
-import { nodeTokenValid, tokenFromHeader } from "@/lib/auth";
+import { authorizeReport, tokenFromHeader } from "@/lib/auth";
 import { clientIp } from "@/lib/net";
 import { resolveCountry, shouldResolve } from "@/lib/geo";
 import { maybeEvaluate } from "@/lib/monitoring";
@@ -21,12 +21,14 @@ export async function POST(req: NextRequest) {
 
   const headerToken = tokenFromHeader(req.headers.get("authorization"));
   const token = headerToken ?? body?.token ?? null;
-  if (!(await nodeTokenValid(token))) {
-    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  }
 
   if (!body?.host?.hostname || !body?.metrics) {
     return NextResponse.json({ error: "malformed report" }, { status: 400 });
+  }
+  // Authorization is hostname-bound: an unbound token binds on first call;
+  // a token bound to a different host is rejected.
+  if (!(await authorizeReport(token, body.host.hostname))) {
+    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
   try {

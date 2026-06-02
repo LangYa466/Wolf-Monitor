@@ -111,6 +111,12 @@ const zhHant: Dict = {
   ghProxyDesc:
     "啟用後，安裝腳本與 wolf-node 二進位皆透過鏡像下載（適合大陸伺服器）。留空則使用 https://ghfast.top。",
   nodeTokenLabel: "節點 Token（用於安裝參數 -t）",
+  newServerLabel: "新增節點安裝 Token",
+  newServerDesc:
+    "為一台尚未安裝的伺服器產生一個未綁定 Token；首次上報時將自動綁定該主機名。每台伺服器使用自己的 Token。",
+  createToken: "建立 Token",
+  nodeTokenHint: "此節點專屬 Token。重置後需重新安裝該節點。",
+  msgTokenCreated: "Token 已建立。",
   rotate: "重置",
   installLinux: "一鍵安裝 · Linux/macOS（HTTP 傳輸 — 適用於 Vercel 與自架）：",
   installWin: "Windows（系統管理員 PowerShell）：",
@@ -291,6 +297,12 @@ const en: Dict = {
   ghProxyDesc:
     "When on, the install script and wolf-node binary both download through a GitHub mirror (useful from mainland China). Leave the URL blank to use https://ghfast.top.",
   nodeTokenLabel: "Node token (use in install -t)",
+  newServerLabel: "New server install token",
+  newServerDesc:
+    "Create an unbound token for a server you haven't installed yet — it binds to that server's hostname on its first report. Every node has its own token.",
+  createToken: "Create token",
+  nodeTokenHint: "This node's unique token. Rotating it requires reinstalling that node.",
+  msgTokenCreated: "Token created.",
   rotate: "Rotate",
   installLinux: "One-click install · Linux/macOS (HTTP transport — works on Vercel & self-host):",
   installWin: "Windows (elevated PowerShell):",

@@ -186,17 +186,19 @@ const TABS: { value: SettingsTab; key: string }[] = [
 
 function ServersSection({ nodes }: { nodes: NodeView[] }) {
   const { t } = useI18n();
-  const [nodeToken, setNodeToken] = useState("");
   const [ipinfoToken, setIpinfoToken] = useState("");
   const [publicDashboard, setPublicDashboard] = useState(false);
   const [ghProxyEnabled, setGhProxyEnabled] = useState(false);
   const [ghProxyUrl, setGhProxyUrl] = useState("");
+  const [nodeTokens, setNodeTokens] = useState<Record<string, string>>({});
+  const [unboundTokens, setUnboundTokens] = useState<Array<{ token: string; createdAt: number }>>([]);
   const [order, setOrder] = useState<NodeView[]>(nodes);
   const [dragId, setDragId] = useState<string | null>(null);
   const [names, setNames] = useState<Record<string, string>>({});
   const [cipherKey, setCipherKey] = useState("");
   const [cipherTweak, setCipherTweak] = useState("");
   const [openInstall, setOpenInstall] = useState<string | null>(null);
+  const [showNewServer, setShowNewServer] = useState(false);
   const [msg, setMsg] = useState("");
 
   useEffect(() => setOrder(nodes), [nodes]);
@@ -207,11 +209,12 @@ function ServersSection({ nodes }: { nodes: NodeView[] }) {
     fetch("/api/settings")
       .then((r) => (r.ok ? r.json() : Promise.reject()))
       .then((d) => {
-        setNodeToken(d.nodeToken ?? "");
         setIpinfoToken(d.ipinfoToken ?? "");
         setPublicDashboard(d.publicDashboard === true);
         setGhProxyEnabled(d.ghProxyEnabled === true);
         setGhProxyUrl(d.ghProxyUrl ?? "");
+        setNodeTokens(d.nodeTokens ?? {});
+        setUnboundTokens(d.unboundTokens ?? []);
         setCipherKey(d.idCipherKey ?? "");
         setCipherTweak(d.idCipherTweak ?? "");
       })
@@ -264,12 +267,30 @@ function ServersSection({ nodes }: { nodes: NodeView[] }) {
     const res = await api("/api/settings", "POST", { ghProxyUrl });
     setMsg(res.ok ? t("msgSaved") : t("msgFailed"));
   }
-  async function rotate() {
-    const res = await api("/api/settings", "POST", { rotateNodeToken: true });
+  async function rotateNodeToken(hostname: string) {
+    const res = await api("/api/settings", "POST", {
+      rotateNodeToken: { hostname },
+    });
     if (res.ok) {
       const d = await res.json();
-      setNodeToken(d.nodeToken);
+      setNodeTokens(d.nodeTokens ?? {});
       setMsg(t("msgTokenRotated"));
+    }
+  }
+  async function createUnboundToken() {
+    const res = await api("/api/settings", "POST", { createUnboundToken: true });
+    if (res.ok) {
+      const d = await res.json();
+      setUnboundTokens(d.unboundTokens ?? []);
+      setShowNewServer(true);
+      setMsg(t("msgTokenCreated"));
+    }
+  }
+  async function deleteToken(token: string) {
+    const res = await api("/api/settings", "POST", { deleteToken: token });
+    if (res.ok) {
+      const d = await res.json();
+      setUnboundTokens(d.unboundTokens ?? []);
     }
   }
   async function onDrop(targetId: string) {
@@ -297,7 +318,6 @@ function ServersSection({ nodes }: { nodes: NodeView[] }) {
   // http(s) base for install commands. HTTP transport works on both Vercel
   // (serverless can't hold a WebSocket) and self-host, so it's the safe default.
   const base = `${proto === "wss" ? "https" : "http"}://${origin}`;
-  const tok = nodeToken || "TOKEN";
   // Active GitHub mirror — empty when off. Falls back to ghfast.top when
   // enabled with a blank URL (the most common preset for mainland users).
   const activeProxy = ghProxyEnabled ? (ghProxyUrl.trim() || "https://ghfast.top") : "";
@@ -317,15 +337,43 @@ function ServersSection({ nodes }: { nodes: NodeView[] }) {
           <Switch checked={publicDashboard} onCheckedChange={togglePublic} />
         </div>
 
-        <Field label={t("nodeTokenLabel")}>
-          <div className="flex gap-2">
-            <Input readOnly value={nodeToken} className="font-mono" onFocus={(e) => e.currentTarget.select()} />
-            <Button variant="outline" size="sm" onClick={rotate} className="[&_svg]:size-3.5">
-              <RotateCw /> {t("rotate")}
+        {/* Per-node tokens. Each existing server gets a unique token (see the
+            collapsible install snippet on each row below). For a brand-new
+            server, pre-create an unbound token and use it in the install
+            command — it'll bind to that server's hostname on first report. */}
+        <div className="space-y-2 rounded-md border border-border bg-muted/40 p-3">
+          <div className="flex items-start justify-between gap-4">
+            <div className="min-w-0">
+              <Label className="text-sm text-foreground">{t("newServerLabel")}</Label>
+              <p className="mt-1 text-xs text-muted-foreground">{t("newServerDesc")}</p>
+            </div>
+            <Button variant="outline" size="sm" onClick={createUnboundToken}>
+              {t("createToken")}
             </Button>
           </div>
-        </Field>
-        <InstallSnippet base={base} tok={tok} proxy={activeProxy} />
+          {unboundTokens.length > 0 && (
+            <div className="space-y-2">
+              {unboundTokens.map((u) => (
+                <div key={u.token} className="space-y-1">
+                  <div className="flex items-center gap-2 text-xs">
+                    <span className="font-mono text-muted-foreground">{u.token}</span>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="ml-auto text-xs"
+                      onClick={() => deleteToken(u.token)}
+                    >
+                      <Trash2 className="size-3.5" />
+                    </Button>
+                  </div>
+                  {showNewServer && (
+                    <InstallSnippet base={base} tok={u.token} proxy={activeProxy} />
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
 
         <div className="space-y-2 rounded-md border border-border bg-muted/40 p-3">
           <div className="flex items-start justify-between gap-4">
@@ -411,8 +459,24 @@ function ServersSection({ nodes }: { nodes: NodeView[] }) {
                   <span className={`ml-1 h-2 w-2 shrink-0 rounded-full ${n.online ? "bg-success" : "bg-destructive"}`} />
                 </div>
                 {openInstall === n.id && (
-                  <div className="mt-1.5">
-                    <InstallSnippet base={base} tok={tok} hostname={n.host.hostname} proxy={activeProxy} />
+                  <div className="mt-1.5 space-y-1.5">
+                    <InstallSnippet
+                      base={base}
+                      tok={nodeTokens[n.host.hostname] ?? "TOKEN"}
+                      hostname={n.host.hostname}
+                      proxy={activeProxy}
+                    />
+                    <div className="flex items-center justify-end gap-2 text-xs">
+                      <span className="mr-auto text-muted-foreground">{t("nodeTokenHint")}</span>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="[&_svg]:size-3.5"
+                        onClick={() => rotateNodeToken(n.host.hostname)}
+                      >
+                        <RotateCw /> {t("rotate")}
+                      </Button>
+                    </div>
                   </div>
                 )}
               </div>

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { nodeTokenValid, tokenFromHeader } from "@/lib/auth";
+import { authorizeAnyNode, tokenFromHeader } from "@/lib/auth";
 import { savePingResults } from "@/lib/monitoring";
 import type { PingResult } from "@/lib/types";
 
@@ -9,7 +9,7 @@ export const dynamic = "force-dynamic";
 
 export async function POST(req: NextRequest) {
   const token = tokenFromHeader(req.headers.get("authorization"));
-  if (!(await nodeTokenValid(token)))
+  if (!(await authorizeAnyNode(token)))
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
   let body: { results?: PingResult[] };
