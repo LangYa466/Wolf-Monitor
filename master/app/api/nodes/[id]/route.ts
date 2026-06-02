@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { currentUser } from "@/lib/session";
-import { setNodeName } from "@/lib/db";
+import { deleteNode, setNodeName } from "@/lib/db";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -25,5 +25,26 @@ export async function PATCH(
   } catch (err) {
     console.error("rename failed:", err);
     return NextResponse.json({ error: "bad request" }, { status: 400 });
+  }
+}
+
+// DELETE /api/nodes/:id — remove a node and cascade-clean every row that
+// references it (history, alerts state, offline settings, ping results,
+// per-node admission token, and the id's presence in alert_rules.targets /
+// ping_tasks.node_ids). Admin only.
+export async function DELETE(
+  _req: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  if (!(await currentUser()))
+    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+
+  const { id } = await params;
+  try {
+    await deleteNode(decodeURIComponent(id));
+    return NextResponse.json({ ok: true });
+  } catch (err) {
+    console.error("delete node failed:", err);
+    return NextResponse.json({ error: "delete failed" }, { status: 500 });
   }
 }

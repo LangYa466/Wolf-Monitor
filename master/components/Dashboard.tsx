@@ -379,6 +379,25 @@ function Cell({ label, value, className }: { label: string; value: string; class
   );
 }
 
+// One combined up/down cell — frees the row width that the separate UP and
+// DOWN cells were eating so the server name has room to breathe.
+function NetCell({ up, down }: { up: number; down: number }) {
+  const { t } = useI18n();
+  return (
+    <div className="w-[88px] shrink-0 text-center">
+      <div className="text-[10px] uppercase tracking-wide text-muted-foreground">{t("mNet")}</div>
+      <div className="flex flex-col items-center gap-0 text-[11px] font-semibold leading-tight tabular-nums">
+        <span className="inline-flex items-center gap-0.5">
+          <ArrowUp className="size-2.5 text-primary" /> {speed(up)}
+        </span>
+        <span className="inline-flex items-center gap-0.5">
+          <ArrowDown className="size-2.5 text-success" /> {speed(down)}
+        </span>
+      </div>
+    </div>
+  );
+}
+
 // Grid-view card: one server as a horizontal row of identity + 5 metric cells.
 function ServerRow({ node }: { node: NodeView }) {
   const { t } = useI18n();
@@ -404,8 +423,7 @@ function ServerRow({ node }: { node: NodeView }) {
         <Cell label={t("mCpu")} value={pct(m.cpuUsage)} className={pctColor(m.cpuUsage)} />
         <Cell label={t("mMem")} value={pct(m.memPercent)} className={pctColor(m.memPercent)} />
         <Cell label={t("mStorage")} value={pct(m.diskPercent)} className={pctColor(m.diskPercent)} />
-        <Cell label={t("mUp")} value={speed(m.netUpSpeed)} />
-        <Cell label={t("mDown")} value={speed(m.netDownSpeed)} />
+        <NetCell up={m.netUpSpeed} down={m.netDownSpeed} />
       </div>
     </Link>
   );
@@ -439,8 +457,7 @@ function ServerListRow({ node, first }: { node: NodeView; first: boolean }) {
         <Cell label={t("mCpu")} value={pct(m.cpuUsage)} className={pctColor(m.cpuUsage)} />
         <Cell label={t("mMem")} value={pct(m.memPercent)} className={pctColor(m.memPercent)} />
         <Cell label={t("mStorage")} value={pct(m.diskPercent)} className={pctColor(m.diskPercent)} />
-        <Cell label={t("mUp")} value={speed(m.netUpSpeed)} />
-        <Cell label={t("mDown")} value={speed(m.netDownSpeed)} />
+        <NetCell up={m.netUpSpeed} down={m.netDownSpeed} />
       </div>
     </Link>
   );

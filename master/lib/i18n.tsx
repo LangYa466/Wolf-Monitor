@@ -66,6 +66,7 @@ const zhHant: Dict = {
   mStorage: "存儲",
   mUp: "上傳",
   mDown: "下載",
+  mNet: "上下行",
   offline: "離線",
 
   // detail header fields
@@ -117,6 +118,9 @@ const zhHant: Dict = {
   createToken: "建立 Token",
   nodeTokenHint: "此節點專屬 Token。重置後需重新安裝該節點。",
   msgTokenCreated: "Token 已建立。",
+  deleteNode: "刪除節點",
+  confirmDeleteNode: "確定刪除節點「{name}」？歷史數據、Token 與相關通知/監測設定將一併移除。",
+  msgNodeDeleted: "已刪除節點「{name}」及其所有關聯設定。",
   rotate: "重置",
   installLinux: "一鍵安裝 · Linux/macOS（HTTP 傳輸 — 適用於 Vercel 與自架）：",
   installWin: "Windows（系統管理員 PowerShell）：",
@@ -254,6 +258,7 @@ const en: Dict = {
   mStorage: "DISK",
   mUp: "UP",
   mDown: "DOWN",
+  mNet: "NET",
   offline: "Offline",
 
   status: "Status",
@@ -303,6 +308,9 @@ const en: Dict = {
   createToken: "Create token",
   nodeTokenHint: "This node's unique token. Rotating it requires reinstalling that node.",
   msgTokenCreated: "Token created.",
+  deleteNode: "Delete node",
+  confirmDeleteNode: "Delete node \"{name}\"? History, token, and all related alert / offline / latency settings will be removed.",
+  msgNodeDeleted: "Node \"{name}\" and all its references were deleted.",
   rotate: "Rotate",
   installLinux: "One-click install · Linux/macOS (HTTP transport — works on Vercel & self-host):",
   installWin: "Windows (elevated PowerShell):",

@@ -124,6 +124,13 @@ export default function SettingsView() {
           ? (localStorage.getItem(TAB_KEY) as SettingsTab | null)
           : null) ?? "servers";
 
+  const refreshNodes = useCallback(() => {
+    fetch("/api/nodes")
+      .then((r) => r.json())
+      .then((d) => setNodes(d.nodes ?? []))
+      .catch(() => {});
+  }, []);
+
   useEffect(() => {
     fetch("/api/auth/status")
       .then((r) => r.json())
@@ -133,11 +140,8 @@ export default function SettingsView() {
         else setReady(true);
       })
       .catch(() => setReady(true));
-    fetch("/api/nodes")
-      .then((r) => r.json())
-      .then((d) => setNodes(d.nodes ?? []))
-      .catch(() => {});
-  }, []);
+    refreshNodes();
+  }, [refreshNodes]);
 
   // On first paint, if a legacy localStorage tab is present and no ?tab= is in
   // the URL, push it into the URL so the bar reflects state. Use replaceState
@@ -187,7 +191,7 @@ export default function SettingsView() {
 
       {/* section content (no transition — instant switch) */}
       <div key={tab}>
-        {tab === "servers" && <ServersSection nodes={nodes} />}
+        {tab === "servers" && <ServersSection nodes={nodes} onNodesChange={refreshNodes} />}
         {tab === "notify" && <NotificationSettings />}
         {tab === "alerts" && <AlertRules nodes={nodes} />}
         {tab === "offline" && <OfflineSettings nodes={nodes} />}
@@ -209,7 +213,13 @@ const TABS: { value: SettingsTab; key: string }[] = [
 
 // ── Servers: token, ipinfo, drag reorder ────────────────────────────────────
 
-function ServersSection({ nodes }: { nodes: NodeView[] }) {
+function ServersSection({
+  nodes,
+  onNodesChange,
+}: {
+  nodes: NodeView[];
+  onNodesChange: () => void;
+}) {
   const { t } = useI18n();
   const [ipinfoToken, setIpinfoToken] = useState("");
   const [publicDashboard, setPublicDashboard] = useState(false);
@@ -316,6 +326,23 @@ function ServersSection({ nodes }: { nodes: NodeView[] }) {
     if (res.ok) {
       const d = await res.json();
       setUnboundTokens(d.unboundTokens ?? []);
+    }
+  }
+  async function deleteNode(n: NodeView) {
+    const label = n.name?.trim() || n.host.hostname;
+    if (!confirm(t("confirmDeleteNode", { name: label }))) return;
+    // Optimistically remove from local lists so the row disappears instantly;
+    // parent refetch reconciles authoritative state (also drops the node out
+    // of the alert/offline/ping selectors on other tabs).
+    setOrder((cur) => cur.filter((x) => x.id !== n.id));
+    const res = await api(`/api/nodes/${encodeURIComponent(n.id)}`, "DELETE");
+    if (res.ok) {
+      setMsg(t("msgNodeDeleted", { name: label }));
+      onNodesChange();
+    } else {
+      // Roll back the optimistic update by deferring to the parent's snapshot.
+      onNodesChange();
+      setMsg(t("msgFailed"));
     }
   }
   async function onDrop(targetId: string) {
@@ -480,6 +507,15 @@ function ServersSection({ nodes }: { nodes: NodeView[] }) {
                     )}
                   >
                     <Terminal />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => deleteNode(n)}
+                    aria-label={t("deleteNode")}
+                    title={t("deleteNode")}
+                    className="inline-flex size-7 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive [&_svg]:size-4"
+                  >
+                    <Trash2 />
                   </button>
                   <span className={`ml-1 h-2 w-2 shrink-0 rounded-full ${n.online ? "bg-success" : "bg-destructive"}`} />
                 </div>

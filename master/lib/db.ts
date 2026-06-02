@@ -351,6 +351,54 @@ export async function listNodes(): Promise<NodeView[]> {
   );
 }
 
+// deleteNode removes a node and every row that references it across the
+// monitoring schema — history, alert/offline state, ping results, node
+// tokens — and prunes its id out of the JSONB target arrays on alert_rules
+// and ping_tasks so deleted nodes can never reappear as a phantom target.
+// Runs in a transaction so a partial failure doesn't leave dangling refs.
+export async function deleteNode(id: string): Promise<void> {
+  await ensureSchema();
+  const pool = getPool();
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query(`DELETE FROM metrics_history WHERE node_id = $1`, [id]);
+    await client.query(`DELETE FROM alert_state WHERE node_id = $1`, [id]);
+    await client.query(`DELETE FROM offline_settings WHERE node_id = $1`, [id]);
+    await client.query(`DELETE FROM ping_results WHERE node_id = $1`, [id]);
+    await client.query(`DELETE FROM node_tokens WHERE node_id = $1`, [id]);
+    // Prune the id from JSONB target arrays. `jsonb - text` doesn't exist on
+    // arrays, so use a subquery that rebuilds the array minus this id.
+    await client.query(
+      `UPDATE alert_rules
+          SET targets = COALESCE(
+            (SELECT jsonb_agg(elem)
+               FROM jsonb_array_elements_text(targets) elem
+              WHERE elem <> $1),
+            '[]'::jsonb)
+        WHERE targets ? $1`,
+      [id],
+    );
+    await client.query(
+      `UPDATE ping_tasks
+          SET node_ids = COALESCE(
+            (SELECT jsonb_agg(elem)
+               FROM jsonb_array_elements_text(node_ids) elem
+              WHERE elem <> $1),
+            '[]'::jsonb)
+        WHERE node_ids ? $1`,
+      [id],
+    );
+    await client.query(`DELETE FROM nodes WHERE id = $1`, [id]);
+    await client.query("COMMIT");
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
 // setNodeName updates a node's display name (empty string clears it). Keyed by
 // the internal hostname id.
 export async function setNodeName(id: string, name: string): Promise<void> {
