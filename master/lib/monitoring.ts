@@ -285,14 +285,28 @@ export async function latencyHistoryForNode(
   return out;
 }
 
-// Latest latency per (task, node) for the dashboard.
+// Latest latency per (task, node) for the dashboard / /latency view.
+//
+// Filtered to (task, node) pairs that match the task's CURRENT assignment
+// (enabled + allowlist/blacklist), so rows recorded before a task's targets
+// changed don't keep showing up. Also joins `nodes` to drop results for
+// servers that have been deleted (defense in depth — delete cascade should
+// have removed them, but this is cheap and guards against drift).
 export async function latestPingResults(): Promise<PingResult[]> {
   await ensureSchema();
   const { rows } = await getPool().query(
-    `SELECT DISTINCT ON (task_id, node_id)
-        task_id, node_id, ts, latency_ms, success
-       FROM ping_results
-      ORDER BY task_id, node_id, ts DESC`
+    `SELECT DISTINCT ON (pr.task_id, pr.node_id)
+        pr.task_id, pr.node_id, pr.ts, pr.latency_ms, pr.success
+       FROM ping_results pr
+       JOIN ping_tasks pt ON pt.id = pr.task_id
+       JOIN nodes n ON n.id = pr.node_id
+      WHERE pt.enabled = TRUE
+        AND (
+          (pt.exclude = FALSE AND (pt.node_ids = '[]'::jsonb OR pt.node_ids ? pr.node_id))
+          OR
+          (pt.exclude = TRUE AND NOT (pt.node_ids ? pr.node_id))
+        )
+      ORDER BY pr.task_id, pr.node_id, pr.ts DESC`
   );
   return rows.map((r) => ({
     taskId: r.task_id,
