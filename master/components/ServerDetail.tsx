@@ -17,7 +17,7 @@ import {
 } from "@/lib/format";
 import type { PingResult, PingTask } from "@/lib/types";
 import { cn } from "@/lib/utils";
-import { MetricChart } from "@/components/Charts";
+import { BandwidthChart, MetricChart } from "@/components/Charts";
 import { useI18n } from "@/lib/i18n";
 import { ChevronLeft, ArrowUp, ArrowDown, LayoutDashboard, Radar, AlertTriangle, Clock } from "lucide-react";
 import { SegmentedControl } from "@/components/ui/segmented";
@@ -460,6 +460,26 @@ export default function ServerDetail({
         </div>
       ) : (
         <div className="space-y-3">
+          <BandwidthChart
+            id="c-bw"
+            title={t("chBandwidth")}
+            legend={
+              <span className="inline-flex items-center gap-2">
+                <span className="inline-flex items-center gap-0.5 text-primary">
+                  <ArrowUp className="size-3" />
+                  {speed(m.netUpSpeed)}
+                </span>
+                <span className="inline-flex items-center gap-0.5 text-warning">
+                  <ArrowDown className="size-3" />
+                  {speed(m.netDownSpeed)}
+                </span>
+              </span>
+            }
+            up={netUp}
+            down={netDown}
+            timestamps={ts}
+            fmt={speed}
+          />
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
             {netChart}
             {tcpChart}

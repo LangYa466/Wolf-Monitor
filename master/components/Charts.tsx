@@ -254,3 +254,247 @@ export function MetricChart({
     </div>
   );
 }
+
+// BandwidthChart renders a centered-zero bar chart: each sample is a thin
+// vertical line drawn from the zero baseline — upward for upload, downward
+// for download. Mimics Grafana-style "Network Bandwidth Usage" panels.
+export function BandwidthChart({
+  title,
+  legend,
+  up,
+  down,
+  timestamps,
+  id,
+  className,
+  fmt,
+  height = 180,
+}: {
+  title: React.ReactNode;
+  legend?: React.ReactNode;
+  up: number[];
+  down: number[];
+  timestamps?: number[];
+  id: string;
+  className?: string;
+  fmt: (v: number) => string;
+  height?: number;
+}) {
+  const plotRef = React.useRef<HTMLDivElement>(null);
+  const [idx, setIdx] = React.useState<number | null>(null);
+  const n = Math.max(up.length, down.length);
+
+  const peak = Math.max(1, ...up, ...down);
+  const max = niceBound(peak);
+  const W = 100;
+  const H = 100;
+  const mid = H / 2;
+
+  const upColor = "hsl(217 91% 60%)";
+  const downColor = "hsl(15 86% 60%)";
+
+  const pick = React.useCallback(
+    (clientX: number) => {
+      const el = plotRef.current;
+      if (!el || n === 0) return;
+      const rect = el.getBoundingClientRect();
+      const rel = clamp((clientX - rect.left) / rect.width, 0, 1);
+      setIdx(Math.round(rel * (n - 1)));
+    },
+    [n],
+  );
+
+  const xPct = idx == null ? 0 : n > 1 ? (idx / (n - 1)) * 100 : 50;
+  const tipPct = clamp(xPct, 14, 86);
+  const showTip = idx != null && n > 0;
+
+  function xFor(i: number): number {
+    if (n <= 1) return W / 2;
+    return (i / (n - 1)) * W;
+  }
+  function yUp(v: number): number {
+    return mid - (clamp(v, 0, max) / max) * mid;
+  }
+  function yDown(v: number): number {
+    return mid + (clamp(v, 0, max) / max) * mid;
+  }
+
+  // Time labels along the bottom — about one every ~70px once stretched.
+  const tickCount = 8;
+  const ticks: { i: number; label: string }[] = [];
+  if (timestamps && timestamps.length > 0) {
+    const last = Math.min(n, timestamps.length);
+    for (let k = 0; k < tickCount; k++) {
+      const i = Math.round((k / (tickCount - 1)) * (last - 1));
+      const t = timestamps[i];
+      if (t == null) continue;
+      const d = new Date(t);
+      const p = (x: number) => String(x).padStart(2, "0");
+      ticks.push({ i, label: `${p(d.getHours())}:${p(d.getMinutes())}` });
+    }
+  }
+
+  return (
+    <div
+      className={cn(
+        "rounded-md border border-border bg-card p-4 text-card-foreground",
+        className,
+      )}
+    >
+      <div className="mb-3 flex items-start justify-between gap-2">
+        <div className="text-[15px] font-semibold tracking-tight">{title}</div>
+        <div className="text-right text-xs text-muted-foreground tnum">{legend}</div>
+      </div>
+
+      <div
+        ref={plotRef}
+        className="relative cursor-crosshair touch-none"
+        onMouseMove={(e) => pick(e.clientX)}
+        onMouseLeave={() => setIdx(null)}
+        onTouchStart={(e) => pick(e.touches[0].clientX)}
+        onTouchMove={(e) => pick(e.touches[0].clientX)}
+        onTouchEnd={() => setIdx(null)}
+      >
+        {/* y-axis labels */}
+        <div className="pointer-events-none absolute inset-y-0 left-0 z-10 flex flex-col justify-between text-[10px] text-muted-foreground tnum">
+          <span>+{fmt(max)}</span>
+          <span>0</span>
+          <span>-{fmt(max)}</span>
+        </div>
+
+        <svg
+          viewBox={`0 0 ${W} ${H}`}
+          preserveAspectRatio="none"
+          width="100%"
+          height={height}
+          className="block"
+        >
+          {/* horizontal grid: top, quartiles, zero, bottom */}
+          {[0, 0.25, 0.5, 0.75, 1].map((g) => (
+            <line
+              key={g}
+              x1="0"
+              x2={W}
+              y1={g * H}
+              y2={g * H}
+              stroke="hsl(var(--border))"
+              strokeWidth={1}
+              vectorEffect="non-scaling-stroke"
+              strokeDasharray={g === 0.5 ? undefined : "3 3"}
+              opacity={g === 0.5 ? 0.9 : 0.45}
+            />
+          ))}
+
+          {/* upload bars (positive, above zero) */}
+          {up.map((v, i) =>
+            v > 0 ? (
+              <line
+                key={`u${i}`}
+                x1={xFor(i)}
+                x2={xFor(i)}
+                y1={mid}
+                y2={yUp(v)}
+                stroke={upColor}
+                strokeWidth={1}
+                strokeLinecap="butt"
+                vectorEffect="non-scaling-stroke"
+                opacity={0.95}
+              />
+            ) : null,
+          )}
+
+          {/* download bars (drawn below zero) */}
+          {down.map((v, i) =>
+            v > 0 ? (
+              <line
+                key={`d${i}`}
+                x1={xFor(i)}
+                x2={xFor(i)}
+                y1={mid}
+                y2={yDown(v)}
+                stroke={downColor}
+                strokeWidth={1}
+                strokeLinecap="butt"
+                vectorEffect="non-scaling-stroke"
+                opacity={0.95}
+              />
+            ) : null,
+          )}
+        </svg>
+
+        {showTip && (
+          <>
+            <div
+              className="pointer-events-none absolute inset-y-0 z-10 w-px bg-muted-foreground/50"
+              style={{ left: `${xPct}%` }}
+            />
+            <div
+              className="pointer-events-none absolute z-10 size-2 -translate-x-1/2 -translate-y-1/2 rounded-full border border-background"
+              style={{
+                left: `${xPct}%`,
+                top: `${(yUp(up[idx!] ?? 0) / H) * 100}%`,
+                background: upColor,
+              }}
+            />
+            <div
+              className="pointer-events-none absolute z-10 size-2 -translate-x-1/2 -translate-y-1/2 rounded-full border border-background"
+              style={{
+                left: `${xPct}%`,
+                top: `${(yDown(down[idx!] ?? 0) / H) * 100}%`,
+                background: downColor,
+              }}
+            />
+            <div
+              className="pointer-events-none absolute top-1 z-20 -translate-x-1/2 rounded-md border border-border bg-popover px-2.5 py-1.5 shadow-lg"
+              style={{ left: `${tipPct}%` }}
+            >
+              {timestamps && timestamps[idx!] != null && (
+                <div className="mb-1 whitespace-nowrap text-[10px] text-muted-foreground tnum">
+                  {datetime(timestamps[idx!]).slice(5)}
+                </div>
+              )}
+              <div className="flex items-center gap-2 whitespace-nowrap text-[11px] tnum">
+                <span className="size-1.5 shrink-0 rounded-full" style={{ background: upColor }} />
+                <span className="text-muted-foreground">Up</span>
+                <span className="ml-auto font-semibold">{fmt(up[idx!] ?? 0)}</span>
+              </div>
+              <div className="flex items-center gap-2 whitespace-nowrap text-[11px] tnum">
+                <span className="size-1.5 shrink-0 rounded-full" style={{ background: downColor }} />
+                <span className="text-muted-foreground">Down</span>
+                <span className="ml-auto font-semibold">{fmt(down[idx!] ?? 0)}</span>
+              </div>
+            </div>
+          </>
+        )}
+      </div>
+
+      {ticks.length > 0 ? (
+        <div className="relative mt-1 h-3 text-[10px] text-muted-foreground tnum">
+          {ticks.map((tk, k) => {
+            const pos = n > 1 ? (tk.i / (n - 1)) * 100 : 50;
+            return (
+              <span
+                key={k}
+                className="absolute -translate-x-1/2 whitespace-nowrap"
+                style={{ left: `${pos}%` }}
+              >
+                {tk.label}
+              </span>
+            );
+          })}
+        </div>
+      ) : (
+        <div className="mt-1 h-3" />
+      )}
+    </div>
+  );
+}
+
+// niceBound picks a clean axis bound (1/2/5 × 10ⁿ) for an SI-like display.
+function niceBound(v: number): number {
+  if (v <= 0) return 1;
+  const exp = Math.floor(Math.log10(v));
+  const base = Math.pow(10, exp);
+  const f = v / base;
+  const nf = f <= 1 ? 1 : f <= 2 ? 2 : f <= 5 ? 5 : 10;
+  return nf * base;
+}
