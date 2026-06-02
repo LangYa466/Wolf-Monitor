@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { Info } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { datetime } from "@/lib/format";
 
@@ -255,19 +256,21 @@ export function MetricChart({
   );
 }
 
-// BandwidthChart renders a centered-zero bar chart: each sample is a thin
-// vertical line drawn from the zero baseline — upward for upload, downward
-// for download. Mimics Grafana-style "Network Bandwidth Usage" panels.
+// BandwidthChart renders a Grafana-style "Network Bandwidth Usage" panel:
+// upload bars rise from a centered zero baseline, download bars drop. Each
+// half computes its own nice axis bound (so an asymmetric busy-download host
+// reads cleanly), the zero line is the only solid gridline, others dashed,
+// and the bottom axis carries ~8 evenly-spaced HH:MM ticks.
 export function BandwidthChart({
   title,
   legend,
   up,
   down,
   timestamps,
-  id,
+  id: _id,
   className,
   fmt,
-  height = 180,
+  height = 220,
 }: {
   title: React.ReactNode;
   legend?: React.ReactNode;
@@ -283,14 +286,21 @@ export function BandwidthChart({
   const [idx, setIdx] = React.useState<number | null>(null);
   const n = Math.max(up.length, down.length);
 
-  const peak = Math.max(1, ...up, ...down);
-  const max = niceBound(peak);
+  const upPeak = up.length ? Math.max(...up) : 0;
+  const downPeak = down.length ? Math.max(...down) : 0;
+  const upMax = niceBound(Math.max(1, upPeak));
+  const downMax = niceBound(Math.max(1, downPeak));
+
   const W = 100;
   const H = 100;
-  const mid = H / 2;
+  // Split the H=100 viewBox between up (top) and down (bottom) proportional
+  // to each side's nice bound, so the bars on the bigger side aren't crushed.
+  const total = upMax + downMax;
+  const mid = (upMax / total) * H;
 
-  const upColor = "hsl(217 91% 60%)";
-  const downColor = "hsl(15 86% 60%)";
+  // Grafana defaults: cool color for transmitted (up), warm for received (down).
+  const upColor = "hsl(190 95% 55%)"; // cyan
+  const downColor = "hsl(28 95% 58%)"; // orange
 
   const pick = React.useCallback(
     (clientX: number) => {
@@ -312,55 +322,78 @@ export function BandwidthChart({
     return (i / (n - 1)) * W;
   }
   function yUp(v: number): number {
-    return mid - (clamp(v, 0, max) / max) * mid;
+    return mid - (clamp(v, 0, upMax) / upMax) * mid;
   }
   function yDown(v: number): number {
-    return mid + (clamp(v, 0, max) / max) * mid;
+    return mid + (clamp(v, 0, downMax) / downMax) * (H - mid);
   }
 
-  // Time labels along the bottom — about one every ~70px once stretched.
-  const tickCount = 8;
-  const ticks: { i: number; label: string }[] = [];
-  if (timestamps && timestamps.length > 0) {
+  // Y axis: pick a "nice" step roughly producing 6 ticks across the total span.
+  const yStep = niceStep(total / 6);
+  const yTicks: { val: number; y: number }[] = [{ val: 0, y: mid }];
+  for (let v = yStep; v <= upMax + 0.0001; v += yStep) {
+    yTicks.push({ val: v, y: yUp(v) });
+  }
+  for (let v = yStep; v <= downMax + 0.0001; v += yStep) {
+    yTicks.push({ val: -v, y: yDown(v) });
+  }
+
+  // X axis time ticks — ~8 across.
+  const xTicks: { i: number; label: string }[] = [];
+  if (timestamps && timestamps.length > 0 && n > 0) {
     const last = Math.min(n, timestamps.length);
-    for (let k = 0; k < tickCount; k++) {
-      const i = Math.round((k / (tickCount - 1)) * (last - 1));
+    const count = Math.min(8, Math.max(2, last));
+    for (let k = 0; k < count; k++) {
+      const i = Math.round((k / (count - 1)) * (last - 1));
       const t = timestamps[i];
       if (t == null) continue;
       const d = new Date(t);
       const p = (x: number) => String(x).padStart(2, "0");
-      ticks.push({ i, label: `${p(d.getHours())}:${p(d.getMinutes())}` });
+      xTicks.push({ i, label: `${p(d.getHours())}:${p(d.getMinutes())}` });
     }
   }
 
   return (
     <div
       className={cn(
-        "rounded-md border border-border bg-card p-4 text-card-foreground",
+        "rounded-md border border-border bg-card/60 px-3 pb-2 pt-3 text-card-foreground",
         className,
       )}
     >
-      <div className="mb-3 flex items-start justify-between gap-2">
-        <div className="text-[15px] font-semibold tracking-tight">{title}</div>
-        <div className="text-right text-xs text-muted-foreground tnum">{legend}</div>
+      <div className="mb-2 flex items-start justify-between gap-2">
+        <div className="flex items-center gap-1.5 text-[12px] font-medium tracking-tight text-muted-foreground">
+          <span>{title}</span>
+          <Info className="size-3 opacity-60" />
+        </div>
+        <div className="text-right text-[11px] text-muted-foreground tnum">{legend}</div>
       </div>
 
-      <div
-        ref={plotRef}
-        className="relative cursor-crosshair touch-none"
-        onMouseMove={(e) => pick(e.clientX)}
-        onMouseLeave={() => setIdx(null)}
-        onTouchStart={(e) => pick(e.touches[0].clientX)}
-        onTouchMove={(e) => pick(e.touches[0].clientX)}
-        onTouchEnd={() => setIdx(null)}
-      >
-        {/* y-axis labels */}
-        <div className="pointer-events-none absolute inset-y-0 left-0 z-10 flex flex-col justify-between text-[10px] text-muted-foreground tnum">
-          <span>+{fmt(max)}</span>
-          <span>0</span>
-          <span>-{fmt(max)}</span>
+      <div className="flex">
+        {/* y-axis label gutter — absolutely positioned ticks aligned to gridlines */}
+        <div
+          className="pointer-events-none relative w-12 shrink-0 text-[10px] text-muted-foreground tnum"
+          style={{ height }}
+        >
+          {yTicks.map((tk, k) => (
+            <span
+              key={k}
+              className="absolute right-1 -translate-y-1/2 whitespace-nowrap"
+              style={{ top: `${tk.y}%` }}
+            >
+              {tk.val === 0 ? "0 b/s" : tk.val > 0 ? fmt(tk.val) : `-${fmt(-tk.val)}`}
+            </span>
+          ))}
         </div>
 
+        <div
+          ref={plotRef}
+          className="relative flex-1 cursor-crosshair touch-none"
+          onMouseMove={(e) => pick(e.clientX)}
+          onMouseLeave={() => setIdx(null)}
+          onTouchStart={(e) => pick(e.touches[0].clientX)}
+          onTouchMove={(e) => pick(e.touches[0].clientX)}
+          onTouchEnd={() => setIdx(null)}
+        >
         <svg
           viewBox={`0 0 ${W} ${H}`}
           preserveAspectRatio="none"
@@ -368,23 +401,26 @@ export function BandwidthChart({
           height={height}
           className="block"
         >
-          {/* horizontal grid: top, quartiles, zero, bottom */}
-          {[0, 0.25, 0.5, 0.75, 1].map((g) => (
-            <line
-              key={g}
-              x1="0"
-              x2={W}
-              y1={g * H}
-              y2={g * H}
-              stroke="hsl(var(--border))"
-              strokeWidth={1}
-              vectorEffect="non-scaling-stroke"
-              strokeDasharray={g === 0.5 ? undefined : "3 3"}
-              opacity={g === 0.5 ? 0.9 : 0.45}
-            />
-          ))}
+          {/* gridlines at each y tick — zero solid, others dashed and faint */}
+          {yTicks.map((tk, k) => {
+            const isZero = tk.val === 0;
+            return (
+              <line
+                key={k}
+                x1="0"
+                x2={W}
+                y1={tk.y}
+                y2={tk.y}
+                stroke="hsl(var(--border))"
+                strokeWidth={1}
+                vectorEffect="non-scaling-stroke"
+                strokeDasharray={isZero ? undefined : "2 4"}
+                opacity={isZero ? 0.85 : 0.35}
+              />
+            );
+          })}
 
-          {/* upload bars (positive, above zero) */}
+          {/* upload bars (positive — above the zero line) */}
           {up.map((v, i) =>
             v > 0 ? (
               <line
@@ -394,7 +430,7 @@ export function BandwidthChart({
                 y1={mid}
                 y2={yUp(v)}
                 stroke={upColor}
-                strokeWidth={1}
+                strokeWidth={0.9}
                 strokeLinecap="butt"
                 vectorEffect="non-scaling-stroke"
                 opacity={0.95}
@@ -402,7 +438,7 @@ export function BandwidthChart({
             ) : null,
           )}
 
-          {/* download bars (drawn below zero) */}
+          {/* download bars (drawn below the zero line) */}
           {down.map((v, i) =>
             v > 0 ? (
               <line
@@ -412,7 +448,7 @@ export function BandwidthChart({
                 y1={mid}
                 y2={yDown(v)}
                 stroke={downColor}
-                strokeWidth={1}
+                strokeWidth={0.9}
                 strokeLinecap="butt"
                 vectorEffect="non-scaling-stroke"
                 opacity={0.95}
@@ -424,14 +460,14 @@ export function BandwidthChart({
         {showTip && (
           <>
             <div
-              className="pointer-events-none absolute inset-y-0 z-10 w-px bg-muted-foreground/50"
+              className="pointer-events-none absolute inset-y-0 z-10 w-px bg-muted-foreground/40"
               style={{ left: `${xPct}%` }}
             />
             <div
               className="pointer-events-none absolute z-10 size-2 -translate-x-1/2 -translate-y-1/2 rounded-full border border-background"
               style={{
                 left: `${xPct}%`,
-                top: `${(yUp(up[idx!] ?? 0) / H) * 100}%`,
+                top: `${yUp(up[idx!] ?? 0)}%`,
                 background: upColor,
               }}
             />
@@ -439,7 +475,7 @@ export function BandwidthChart({
               className="pointer-events-none absolute z-10 size-2 -translate-x-1/2 -translate-y-1/2 rounded-full border border-background"
               style={{
                 left: `${xPct}%`,
-                top: `${(yDown(down[idx!] ?? 0) / H) * 100}%`,
+                top: `${yDown(down[idx!] ?? 0)}%`,
                 background: downColor,
               }}
             />
@@ -454,22 +490,23 @@ export function BandwidthChart({
               )}
               <div className="flex items-center gap-2 whitespace-nowrap text-[11px] tnum">
                 <span className="size-1.5 shrink-0 rounded-full" style={{ background: upColor }} />
-                <span className="text-muted-foreground">Up</span>
+                <span className="text-muted-foreground">Transmit</span>
                 <span className="ml-auto font-semibold">{fmt(up[idx!] ?? 0)}</span>
               </div>
               <div className="flex items-center gap-2 whitespace-nowrap text-[11px] tnum">
                 <span className="size-1.5 shrink-0 rounded-full" style={{ background: downColor }} />
-                <span className="text-muted-foreground">Down</span>
+                <span className="text-muted-foreground">Receive</span>
                 <span className="ml-auto font-semibold">{fmt(down[idx!] ?? 0)}</span>
               </div>
             </div>
           </>
         )}
+        </div>
       </div>
 
-      {ticks.length > 0 ? (
-        <div className="relative mt-1 h-3 text-[10px] text-muted-foreground tnum">
-          {ticks.map((tk, k) => {
+      {xTicks.length > 0 ? (
+        <div className="relative ml-12 mt-1 h-3 text-[10px] text-muted-foreground tnum">
+          {xTicks.map((tk, k) => {
             const pos = n > 1 ? (tk.i / (n - 1)) * 100 : 50;
             return (
               <span
@@ -483,7 +520,7 @@ export function BandwidthChart({
           })}
         </div>
       ) : (
-        <div className="mt-1 h-3" />
+        <div className="ml-12 mt-1 h-3" />
       )}
     </div>
   );
@@ -496,5 +533,15 @@ function niceBound(v: number): number {
   const base = Math.pow(10, exp);
   const f = v / base;
   const nf = f <= 1 ? 1 : f <= 2 ? 2 : f <= 5 ? 5 : 10;
+  return nf * base;
+}
+
+// niceStep picks a clean tick step (1/2/5 × 10ⁿ) sized roughly to a target.
+function niceStep(target: number): number {
+  if (target <= 0) return 1;
+  const exp = Math.floor(Math.log10(target));
+  const base = Math.pow(10, exp);
+  const f = target / base;
+  const nf = f < 1.5 ? 1 : f < 3.5 ? 2 : f < 7.5 ? 5 : 10;
   return nf * base;
 }

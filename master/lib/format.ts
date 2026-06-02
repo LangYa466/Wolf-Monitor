@@ -46,6 +46,23 @@ export function pct(n: number): string {
   return `${(n ?? 0).toFixed(1)}%`;
 }
 
+// bitsRate formats a byte-rate as a bits-per-second figure (decimal SI units),
+// the convention Grafana's "Network Bandwidth Usage" panel uses: "0 b/s",
+// "20 Mb/s", "1.5 Gb/s".
+export function bitsRate(bytesPerSec: number, digits = 0): string {
+  const bps = (bytesPerSec || 0) * 8;
+  if (bps <= 0) return "0 b/s";
+  const units = ["b", "Kb", "Mb", "Gb", "Tb"];
+  let v = bps;
+  let i = 0;
+  while (v >= 1000 && i < units.length - 1) {
+    v /= 1000;
+    i++;
+  }
+  const d = i === 0 ? 0 : v >= 100 ? 0 : digits;
+  return `${v.toFixed(d)} ${units[i]}/s`;
+}
+
 export function uptime(seconds: number): string {
   if (!seconds) return "—";
   const d = Math.floor(seconds / 86400);

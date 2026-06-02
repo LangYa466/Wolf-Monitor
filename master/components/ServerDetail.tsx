@@ -6,12 +6,12 @@ import type { NodeView } from "@/lib/types";
 import type { HistoryPoint } from "@/lib/db";
 import {
   ago,
+  bitsRate,
   datetime,
   flagUrl,
   ibytes,
   osDistro,
   pct,
-  speed,
   uptime,
   uptimeCJK,
 } from "@/lib/format";
@@ -195,7 +195,6 @@ export default function ServerDetail({
   const tcp = points.map((p) => p.tcp);
 
   const procsMax = niceMax(Math.max(m.procs, ...procs, 1));
-  const netMax = niceMax(Math.max(m.netUpSpeed, m.netDownSpeed, ...netUp, ...netDown, 1));
   const tcpMax = niceMax(Math.max(m.tcpConns, ...tcp, 1));
 
   const cpuChart = (
@@ -261,32 +260,6 @@ export default function ServerDetail({
       ]}
       max={100}
       yLabels={["100%", "50%", "0%"]}
-      xLeft={xLabel}
-      timestamps={ts}
-    />
-  );
-  const netChart = (
-    <MetricChart
-      id="c-net"
-      title={t("chUpDown")}
-      legend={
-        <span className="inline-flex items-center gap-2">
-          <span className="inline-flex items-center gap-0.5 text-primary">
-            <ArrowUp className="size-3" />
-            {speed(m.netUpSpeed)}
-          </span>
-          <span className="inline-flex items-center gap-0.5 text-success">
-            <ArrowDown className="size-3" />
-            {speed(m.netDownSpeed)}
-          </span>
-        </span>
-      }
-      series={[
-        { data: netUp, color: C.blue, name: t("mUp"), format: speed },
-        { data: netDown, color: C.green, name: t("mDown"), format: speed },
-      ]}
-      max={netMax}
-      yLabels={[speed(netMax), speed(netMax / 2), "0"]}
       xLeft={xLabel}
       timestamps={ts}
     />
@@ -440,7 +413,7 @@ export default function ServerDetail({
             tab === "detail" ? "md:grid-cols-2 lg:grid-cols-3" : "md:grid-cols-2",
           )}
         >
-          {Array.from({ length: tab === "detail" ? 6 : 2 }).map((_, i) => (
+          {Array.from({ length: tab === "detail" ? 3 : 3 }).map((_, i) => (
             <ChartSkeleton key={i} />
           ))}
         </div>
@@ -452,11 +425,8 @@ export default function ServerDetail({
       ) : tab === "detail" ? (
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-3">
           {cpuChart}
-          {procChart}
           {diskChart}
           {memChart}
-          {netChart}
-          {tcpChart}
         </div>
       ) : (
         <div className="space-y-3">
@@ -464,24 +434,24 @@ export default function ServerDetail({
             id="c-bw"
             title={t("chBandwidth")}
             legend={
-              <span className="inline-flex items-center gap-2">
-                <span className="inline-flex items-center gap-0.5 text-primary">
+              <span className="inline-flex items-center gap-3">
+                <span className="inline-flex items-center gap-1" style={{ color: "hsl(190 95% 55%)" }}>
                   <ArrowUp className="size-3" />
-                  {speed(m.netUpSpeed)}
+                  {bitsRate(m.netUpSpeed)}
                 </span>
-                <span className="inline-flex items-center gap-0.5 text-warning">
+                <span className="inline-flex items-center gap-1" style={{ color: "hsl(28 95% 58%)" }}>
                   <ArrowDown className="size-3" />
-                  {speed(m.netDownSpeed)}
+                  {bitsRate(m.netDownSpeed)}
                 </span>
               </span>
             }
             up={netUp}
             down={netDown}
             timestamps={ts}
-            fmt={speed}
+            fmt={bitsRate}
           />
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-            {netChart}
+            {procChart}
             {tcpChart}
           </div>
           <NodeLatency nodeId={node.id} ping={ping} />
