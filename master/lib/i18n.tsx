@@ -107,6 +107,9 @@ const zhHant: Dict = {
   publicDash: "公開儀表板",
   publicDashDesc:
     "訪客無需登入即可查看伺服器即時狀態（server live）。敏感資訊（如 IP）會自動隱藏。",
+  ghProxy: "GitHub 加速",
+  ghProxyDesc:
+    "啟用後，安裝腳本與 wolf-node 二進位皆透過鏡像下載（適合大陸伺服器）。留空則使用 https://ghfast.top。",
   nodeTokenLabel: "節點 Token（用於安裝參數 -t）",
   rotate: "重置",
   installLinux: "一鍵安裝 · Linux/macOS（HTTP 傳輸 — 適用於 Vercel 與自架）：",
@@ -284,6 +287,9 @@ const en: Dict = {
   publicDash: "Public dashboard",
   publicDashDesc:
     "Guests can view live server status without signing in. Sensitive info such as IP is hidden automatically.",
+  ghProxy: "GitHub mirror",
+  ghProxyDesc:
+    "When on, the install script and wolf-node binary both download through a GitHub mirror (useful from mainland China). Leave the URL blank to use https://ghfast.top.",
   nodeTokenLabel: "Node token (use in install -t)",
   rotate: "Rotate",
   installLinux: "One-click install · Linux/macOS (HTTP transport — works on Vercel & self-host):",

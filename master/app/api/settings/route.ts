@@ -17,11 +17,15 @@ export async function GET() {
     const nodeToken = await ensureNodeToken();
     const ipinfoToken = (await getSetting<string>("ipinfoToken")) ?? "";
     const publicDashboard = (await getSetting<boolean>(PUBLIC_DASHBOARD_KEY)) === true;
+    const ghProxyEnabled = (await getSetting<boolean>("ghProxyEnabled")) === true;
+    const ghProxyUrl = (await getSetting<string>("ghProxyUrl")) ?? "";
     const idCipher = await getOpaqueIdConfig();
     return NextResponse.json({
       nodeToken,
       ipinfoToken,
       publicDashboard,
+      ghProxyEnabled,
+      ghProxyUrl,
       idCipherKey: idCipher.key,
       idCipherTweak: idCipher.tweak,
     });
@@ -45,6 +49,12 @@ export async function POST(req: NextRequest) {
     if (typeof body.publicDashboard === "boolean") {
       await setSetting(PUBLIC_DASHBOARD_KEY, body.publicDashboard);
     }
+    if (typeof body.ghProxyEnabled === "boolean") {
+      await setSetting("ghProxyEnabled", body.ghProxyEnabled);
+    }
+    if (typeof body.ghProxyUrl === "string") {
+      await setSetting("ghProxyUrl", body.ghProxyUrl.trim());
+    }
     if (body.rotateIdCipher === true) {
       await rotateOpaqueId();
     } else if (
@@ -59,11 +69,15 @@ export async function POST(req: NextRequest) {
     const nodeToken = await ensureNodeToken();
     const ipinfoToken = (await getSetting<string>("ipinfoToken")) ?? "";
     const publicDashboard = (await getSetting<boolean>(PUBLIC_DASHBOARD_KEY)) === true;
+    const ghProxyEnabled = (await getSetting<boolean>("ghProxyEnabled")) === true;
+    const ghProxyUrl = (await getSetting<string>("ghProxyUrl")) ?? "";
     const idCipher = await getOpaqueIdConfig();
     return NextResponse.json({
       nodeToken,
       ipinfoToken,
       publicDashboard,
+      ghProxyEnabled,
+      ghProxyUrl,
       idCipherKey: idCipher.key,
       idCipherTweak: idCipher.tweak,
     });

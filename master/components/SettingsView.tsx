@@ -42,8 +42,28 @@ import { GripVertical, Trash2, RotateCw, Check, Minus, AlertTriangle, Terminal, 
 // Install commands for a node (identical for every server — the node reports
 // its own hostname; reinstalling just re-runs the same token-based command).
 // Used both for the general snippet and the per-server "view install script".
-function InstallSnippet({ base, tok, hostname }: { base: string; tok: string; hostname?: string }) {
+// When `proxy` is set, prepends it to the install-script URL too (so the
+// script itself downloads through the mirror, not just the wolf-node binary
+// that the script later fetches via `-p`).
+function InstallSnippet({
+  base,
+  tok,
+  hostname,
+  proxy,
+}: {
+  base: string;
+  tok: string;
+  hostname?: string;
+  proxy?: string;
+}) {
   const { t } = useI18n();
+  const p = (proxy ?? "").trim().replace(/\/+$/, "");
+  const shUrl = `https://raw.githubusercontent.com/LangYa466/Wolf-Monitor/main/node/install.sh`;
+  const ps1Url = `https://raw.githubusercontent.com/LangYa466/Wolf-Monitor/main/node/install.ps1`;
+  const shFull = p ? `${p}/${shUrl}` : shUrl;
+  const ps1Full = p ? `${p}/${ps1Url}` : ps1Url;
+  const shProxyArg = p ? ` -p ${p}` : "";
+  const ps1ProxyArg = p ? ` '-p' '${p}'` : "";
   return (
     <div className="space-y-2 rounded-md bg-muted/60 p-3 text-xs">
       {hostname && (
@@ -53,11 +73,11 @@ function InstallSnippet({ base, tok, hostname }: { base: string; tok: string; ho
       )}
       <div className="text-muted-foreground">{t("installLinux")}</div>
       <code className="block break-all text-primary">
-        {`wget -qO- https://raw.githubusercontent.com/LangYa466/Wolf-Monitor/main/node/install.sh | sudo bash -s -- -e ${base} -t ${tok} -T http`}
+        {`wget -qO- ${shFull} | sudo bash -s -- -e ${base} -t ${tok} -T http${shProxyArg}`}
       </code>
       <div className="text-muted-foreground">{t("installWin")}</div>
       <code className="block break-all text-primary">
-        {`powershell -NoProfile -ExecutionPolicy Bypass -Command "iwr 'https://raw.githubusercontent.com/LangYa466/Wolf-Monitor/main/node/install.ps1' -UseBasicParsing -OutFile 'install.ps1'; & '.\\install.ps1' '-e' '${base}' '-t' '${tok}' '-T' 'http'"`}
+        {`powershell -NoProfile -ExecutionPolicy Bypass -Command "iwr '${ps1Full}' -UseBasicParsing -OutFile 'install.ps1'; & '.\\install.ps1' '-e' '${base}' '-t' '${tok}' '-T' 'http'${ps1ProxyArg}"`}
       </code>
       <div className="text-muted-foreground">{t("installWs")}</div>
     </div>
@@ -169,6 +189,8 @@ function ServersSection({ nodes }: { nodes: NodeView[] }) {
   const [nodeToken, setNodeToken] = useState("");
   const [ipinfoToken, setIpinfoToken] = useState("");
   const [publicDashboard, setPublicDashboard] = useState(false);
+  const [ghProxyEnabled, setGhProxyEnabled] = useState(false);
+  const [ghProxyUrl, setGhProxyUrl] = useState("");
   const [order, setOrder] = useState<NodeView[]>(nodes);
   const [dragId, setDragId] = useState<string | null>(null);
   const [names, setNames] = useState<Record<string, string>>({});
@@ -188,6 +210,8 @@ function ServersSection({ nodes }: { nodes: NodeView[] }) {
         setNodeToken(d.nodeToken ?? "");
         setIpinfoToken(d.ipinfoToken ?? "");
         setPublicDashboard(d.publicDashboard === true);
+        setGhProxyEnabled(d.ghProxyEnabled === true);
+        setGhProxyUrl(d.ghProxyUrl ?? "");
         setCipherKey(d.idCipherKey ?? "");
         setCipherTweak(d.idCipherTweak ?? "");
       })
@@ -228,6 +252,18 @@ function ServersSection({ nodes }: { nodes: NodeView[] }) {
     const res = await api("/api/settings", "POST", { ipinfoToken });
     setMsg(res.ok ? t("msgSaved") : t("msgFailed"));
   }
+  async function toggleGhProxy(v: boolean) {
+    setGhProxyEnabled(v); // optimistic
+    const res = await api("/api/settings", "POST", { ghProxyEnabled: v });
+    if (!res.ok) {
+      setGhProxyEnabled(!v);
+      setMsg(t("msgFailed"));
+    }
+  }
+  async function saveGhProxyUrl() {
+    const res = await api("/api/settings", "POST", { ghProxyUrl });
+    setMsg(res.ok ? t("msgSaved") : t("msgFailed"));
+  }
   async function rotate() {
     const res = await api("/api/settings", "POST", { rotateNodeToken: true });
     if (res.ok) {
@@ -262,6 +298,9 @@ function ServersSection({ nodes }: { nodes: NodeView[] }) {
   // (serverless can't hold a WebSocket) and self-host, so it's the safe default.
   const base = `${proto === "wss" ? "https" : "http"}://${origin}`;
   const tok = nodeToken || "TOKEN";
+  // Active GitHub mirror — empty when off. Falls back to ghfast.top when
+  // enabled with a blank URL (the most common preset for mainland users).
+  const activeProxy = ghProxyEnabled ? (ghProxyUrl.trim() || "https://ghfast.top") : "";
 
   return (
     <Card>
@@ -286,7 +325,30 @@ function ServersSection({ nodes }: { nodes: NodeView[] }) {
             </Button>
           </div>
         </Field>
-        <InstallSnippet base={base} tok={tok} />
+        <InstallSnippet base={base} tok={tok} proxy={activeProxy} />
+
+        <div className="space-y-2 rounded-md border border-border bg-muted/40 p-3">
+          <div className="flex items-start justify-between gap-4">
+            <div className="min-w-0">
+              <Label className="text-sm text-foreground">{t("ghProxy")}</Label>
+              <p className="mt-1 text-xs text-muted-foreground">{t("ghProxyDesc")}</p>
+            </div>
+            <Switch checked={ghProxyEnabled} onCheckedChange={toggleGhProxy} />
+          </div>
+          {ghProxyEnabled && (
+            <div className="flex gap-2">
+              <Input
+                value={ghProxyUrl}
+                onChange={(e) => setGhProxyUrl(e.target.value)}
+                placeholder="https://ghfast.top"
+                className="font-mono"
+              />
+              <Button variant="outline" size="sm" onClick={saveGhProxyUrl}>
+                {t("save")}
+              </Button>
+            </div>
+          )}
+        </div>
 
         <Field label={t("ipinfoLabel")}>
           <div className="flex gap-2">
@@ -350,7 +412,7 @@ function ServersSection({ nodes }: { nodes: NodeView[] }) {
                 </div>
                 {openInstall === n.id && (
                   <div className="mt-1.5">
-                    <InstallSnippet base={base} tok={tok} hostname={n.host.hostname} />
+                    <InstallSnippet base={base} tok={tok} hostname={n.host.hostname} proxy={activeProxy} />
                   </div>
                 )}
               </div>
