@@ -20,10 +20,24 @@ export function getPool(): Pool {
     }
     globalForDb.__llPool = new Pool({
       connectionString,
-      // Keep it small: serverless functions are short-lived and remote
-      // Postgres (Neon/Supabase) pools should not be exhausted.
-      max: Number(process.env.PG_POOL_MAX ?? 4),
+      // Serverless reality: every concurrent function instance owns its own
+      // pool. With max=4 and even modest fan-out we blow past the DB's
+      // max_connections (Neon/Supabase free tiers cap at ~20–100). Default to
+      // 1 connection per instance so total in-flight ≈ instance count; raise
+      // PG_POOL_MAX only when running self-hosted with a fat DB.
+      max: Number(process.env.PG_POOL_MAX ?? 1),
+      // Close idle connections quickly so warm-but-unused instances don't sit
+      // on a slot. Cap connect time so a saturated DB fails fast instead of
+      // queueing the whole request behind a 30s default.
+      idleTimeoutMillis: Number(process.env.PG_IDLE_MS ?? 10_000),
+      connectionTimeoutMillis: Number(process.env.PG_CONNECT_MS ?? 5_000),
       ssl: sslOption(connectionString),
+    });
+    // Surface pool-level errors instead of crashing the worker on a dropped
+    // idle connection. `pg` re-emits the error on the pool itself when the
+    // client errors outside of a query (e.g. server-side timeout).
+    globalForDb.__llPool.on("error", (err) => {
+      console.error("pg pool error:", err.message);
     });
   }
   return globalForDb.__llPool;
