@@ -33,6 +33,10 @@ export default function Dashboard({
   const { t } = useI18n();
   const [nodes, setNodes] = useState<NodeView[]>(initial);
   const [error, setError] = useState<string | null>(dbError);
+  // Hide the error banner until the first client poll has settled — a
+  // transient SSR-side DB hiccup (cold-start, brief pool exhaustion) shouldn't
+  // flash red while the first /api/nodes request is still in flight.
+  const [polled, setPolled] = useState(false);
   const [sort, setSort] = useState<SortMode>("custom");
   const [view, setView] = useState<ViewMode>("grid");
   const [region, setRegion] = useState<Region>("all");
@@ -63,6 +67,8 @@ export default function Dashboard({
         }
       } catch (e) {
         if (alive) setError(e instanceof Error ? e.message : "fetch failed");
+      } finally {
+        if (alive) setPolled(true);
       }
     }
     const pollTimer = setInterval(poll, POLL_MS);
@@ -209,7 +215,7 @@ export default function Dashboard({
         />
       </div>
 
-      {error && (
+      {error && polled && (
         <div className="mb-4 flex items-center gap-2 rounded-md border border-destructive/60 bg-destructive/10 p-3 text-sm text-destructive">
           <AlertTriangle className="size-4 shrink-0" /> {error}
         </div>

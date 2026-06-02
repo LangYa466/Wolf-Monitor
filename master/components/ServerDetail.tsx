@@ -117,15 +117,21 @@ export default function ServerDetail({
   }, [histId, range]);
 
   // Refetch on range change; for RealTime keep polling live. Show a loading
-  // skeleton until the first fetch for the current range resolves.
+  // skeleton until the first fetch for the current range resolves. Skip when
+  // histId is still unknown (initial SSR data missing) so we don't briefly
+  // flash "no history" before /api/nodes resolves the node.
   useEffect(() => {
+    if (!histId) {
+      setLoadingHist(true);
+      return;
+    }
     setLoadingHist(true);
     setPoints([]);
     loadHistory().finally(() => setLoadingHist(false));
     if (range !== "realtime") return;
     const t = setInterval(loadHistory, POLL_MS);
     return () => clearInterval(t);
-  }, [loadHistory, range]);
+  }, [loadHistory, range, histId]);
 
   if (!node) {
     return (
