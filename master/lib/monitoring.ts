@@ -232,13 +232,22 @@ export async function savePingResults(results: PingResult[]): Promise<void> {
 // `limitPerTask` points within the window, returned in chronological order.
 // Using ROW_NUMBER PARTITION keeps one busy task from starving the others
 // under a global LIMIT.
+//
+// Important: filtered to the tasks this node is CURRENTLY assigned to (per
+// pingTasksForNode — respects enabled + allowlist/blacklist mode). Tasks the
+// node used to run before its assignment changed leave orphan rows in
+// ping_results; without this filter those would resurface on the detail page.
 export async function latencyHistoryForNode(
   nodeId: string,
   sinceMs: number | undefined,
   limitPerTask: number,
 ): Promise<Record<string, { ts: number; latencyMs: number; success: boolean }[]>> {
   await ensureSchema();
-  const params: (string | number)[] = [nodeId, limitPerTask];
+  const activeTasks = await pingTasksForNode(nodeId);
+  if (activeTasks.length === 0) return {};
+  const taskIds = activeTasks.map((t) => t.id);
+
+  const params: (string | number | string[])[] = [nodeId, taskIds, limitPerTask];
   let timeFilter = "";
   if (sinceMs && sinceMs > 0) {
     params.push(sinceMs);
@@ -254,11 +263,13 @@ export async function latencyHistoryForNode(
        SELECT task_id, ts, latency_ms, success,
               ROW_NUMBER() OVER (PARTITION BY task_id ORDER BY ts DESC) AS rn
          FROM ping_results
-        WHERE node_id = $1${timeFilter}
+        WHERE node_id = $1
+          AND task_id = ANY($2::text[])
+          ${timeFilter}
      )
      SELECT task_id, ts, latency_ms, success
        FROM ranked
-      WHERE rn <= $2
+      WHERE rn <= $3
       ORDER BY task_id, ts ASC`,
     params,
   );

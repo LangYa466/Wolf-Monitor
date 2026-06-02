@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { currentUser } from "@/lib/session";
-import { latencyHistoryForNode, listPingTasks } from "@/lib/monitoring";
+import { latencyHistoryForNode, pingTasksForNode } from "@/lib/monitoring";
 
 // Per-node latency time-series, grouped by task. Admin-only (mirrors
 // /api/ping-results — exposes monitor targets / topology).
@@ -21,9 +21,12 @@ export async function GET(
   const sinceMs = windowMs > 0 ? Date.now() - windowMs : undefined;
 
   try {
+    const nodeId = decodeURIComponent(id);
+    // Both filters must agree with what the node is CURRENTLY assigned to —
+    // orphan rows from a previous assignment shouldn't surface here.
     const [byTask, tasks] = await Promise.all([
-      latencyHistoryForNode(decodeURIComponent(id), sinceMs, limit),
-      listPingTasks(),
+      latencyHistoryForNode(nodeId, sinceMs, limit),
+      pingTasksForNode(nodeId),
     ]);
     return NextResponse.json(
       { tasks, byTask },
