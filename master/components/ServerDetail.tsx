@@ -5,7 +5,6 @@ import Link from "next/link";
 import type { NodeView } from "@/lib/types";
 import type { HistoryPoint } from "@/lib/db";
 import {
-  ago,
   byteRate,
   datetime,
   flagUrl,
@@ -15,7 +14,7 @@ import {
   uptime,
   uptimeCJK,
 } from "@/lib/format";
-import type { PingResult, PingTask } from "@/lib/types";
+import type { PingTask } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { BandwidthChart, MetricChart } from "@/components/Charts";
 import { useI18n } from "@/lib/i18n";
@@ -64,10 +63,6 @@ export default function ServerDetail({
   const [tab, setTab] = useState<Tab>("detail");
   const [now, setNow] = useState<number>(initial?.lastSeen ?? 0);
   const [error, setError] = useState<string | null>(dbError);
-  const [ping, setPing] = useState<{ tasks: PingTask[]; results: PingResult[] }>({
-    tasks: [],
-    results: [],
-  });
   const [loadingHist, setLoadingHist] = useState(true);
 
   // Live node state (header values) — poll the list and pick out this node.
@@ -131,31 +126,6 @@ export default function ServerDetail({
     const t = setInterval(loadHistory, POLL_MS);
     return () => clearInterval(t);
   }, [loadHistory, range]);
-
-  // Latency feed for the Network tab (admin-only endpoint; guests get 401 and
-  // simply see no latency). Filtered to this node below.
-  useEffect(() => {
-    let alive = true;
-    async function load() {
-      try {
-        const res = await fetch("/api/ping-results", { cache: "no-store" });
-        if (!res.ok) {
-          if (alive) setPing({ tasks: [], results: [] });
-          return;
-        }
-        const d = await res.json();
-        if (alive) setPing({ tasks: d.tasks ?? [], results: d.results ?? [] });
-      } catch {
-        /* keep previous */
-      }
-    }
-    load();
-    const t = setInterval(load, 5000);
-    return () => {
-      alive = false;
-      clearInterval(t);
-    };
-  }, []);
 
   if (!node) {
     return (
@@ -454,7 +424,7 @@ export default function ServerDetail({
             {procChart}
             {tcpChart}
           </div>
-          <NodeLatency nodeId={node.id} ping={ping} />
+          <NodeLatencyHistory nodeId={node.id} range={range} xLabel={xLabel} />
         </div>
       )}
 
@@ -496,53 +466,124 @@ function latColor(ms: number): string {
   return "text-success";
 }
 
-// NodeLatency lists this server's own latency probes (filtered to its node id)
-// inside the Network tab. Hidden entirely when there's nothing to show (e.g. a
-// guest, who can't read the admin-only latency feed).
-function NodeLatency({
+// NodeLatencyHistory plots each ping task this node participates in as its
+// own time-series chart — mirrors the Network Bandwidth Usage panel: pulls
+// raw `ping_results` rows for the active range, renders a small chart per
+// task with the current latency in the legend and a timeout/success colour.
+// Failed probes are dropped from the series so they don't draw a fake 0-line
+// spike; the legend still shows "timeout" when the most recent sample failed.
+function NodeLatencyHistory({
   nodeId,
-  ping,
+  range,
+  xLabel,
 }: {
   nodeId: string;
-  ping: { tasks: PingTask[]; results: PingResult[] };
+  range: RangeKey;
+  xLabel: string;
 }) {
   const { t } = useI18n();
-  const rows = ping.results
-    .filter((r) => r.nodeId === nodeId)
-    .map((r) => ({ r, task: ping.tasks.find((x) => x.id === r.taskId) }))
-    .filter((x): x is { r: PingResult; task: PingTask } => Boolean(x.task))
-    .sort((a, b) => a.task.name.localeCompare(b.task.name));
+  const [tasks, setTasks] = useState<PingTask[]>([]);
+  const [byTask, setByTask] = useState<Record<string, { ts: number; latencyMs: number; success: boolean }[]>>({});
+  const [loading, setLoading] = useState(true);
+  const [forbidden, setForbidden] = useState(false);
 
-  if (rows.length === 0) return null;
+  const load = useCallback(async () => {
+    const r = RANGES.find((x) => x.key === range)!;
+    const qs = r.windowMs > 0 ? `?window=${r.windowMs}&limit=2000` : `?limit=120`;
+    try {
+      const res = await fetch(
+        `/api/nodes/${encodeURIComponent(nodeId)}/latency${qs}`,
+        { cache: "no-store" },
+      );
+      if (res.status === 401) {
+        setForbidden(true);
+        return;
+      }
+      if (!res.ok) return;
+      const d = await res.json();
+      setForbidden(false);
+      setTasks(d.tasks ?? []);
+      setByTask(d.byTask ?? {});
+    } catch {
+      /* keep previous */
+    }
+  }, [nodeId, range]);
+
+  useEffect(() => {
+    setLoading(true);
+    load().finally(() => setLoading(false));
+    if (range !== "realtime") return;
+    const t = setInterval(load, POLL_MS);
+    return () => clearInterval(t);
+  }, [load, range]);
+
+  // Guests hit /api/nodes/:id/latency (admin-only) with a 401 — just hide.
+  if (forbidden) return null;
+
+  const presentTasks = tasks
+    .filter((tk) => (byTask[tk.id]?.length ?? 0) > 0)
+    .sort((a, b) => a.name.localeCompare(b.name));
+
+  if (loading && presentTasks.length === 0) {
+    return (
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+        <ChartSkeleton />
+        <ChartSkeleton />
+      </div>
+    );
+  }
+  if (presentTasks.length === 0) return null;
 
   return (
-    <div className="rounded-md border border-border bg-card p-4">
-      <div className="mb-3 text-[15px] font-semibold tracking-tight">{t("ownLatency")}</div>
-      <div className="divide-y divide-border">
-        {rows.map(({ r, task }) => (
-          <div key={task.id} className="flex items-center gap-3 py-2 text-sm">
-            <span
-              className={cn(
-                "h-2 w-2 shrink-0 rounded-full",
-                task.enabled ? "bg-success" : "bg-muted-foreground",
-              )}
+    <div>
+      <div className="mb-2 text-[15px] font-semibold tracking-tight">{t("ownLatency")}</div>
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+        {presentTasks.map((task) => {
+          const pts = byTask[task.id] ?? [];
+          const ok = pts.filter((p) => p.success);
+          const values = ok.map((p) => p.latencyMs);
+          const ts = ok.map((p) => p.ts);
+          const last = pts[pts.length - 1];
+          const peak = values.length ? Math.max(...values) : 1;
+          const max = niceMax(Math.max(1, peak));
+          const fmt = (v: number) => `${v.toFixed(1)} ms`;
+          return (
+            <MetricChart
+              key={task.id}
+              id={`lat-${task.id}`}
+              title={
+                <span className="inline-flex flex-wrap items-baseline gap-x-2">
+                  {task.name}
+                  <span className="text-xs font-normal text-muted-foreground" title={task.target}>
+                    {task.target}
+                  </span>
+                </span>
+              }
+              legend={
+                last ? (
+                  last.success ? (
+                    <span className={latColor(last.latencyMs)}>{fmt(last.latencyMs)}</span>
+                  ) : (
+                    <span className="text-destructive">{t("timeout")}</span>
+                  )
+                ) : null
+              }
+              series={[
+                {
+                  data: values,
+                  color: C.cyan,
+                  area: true,
+                  name: task.name,
+                  format: fmt,
+                },
+              ]}
+              max={max}
+              yLabels={[fmt(max), fmt(max / 2), "0"]}
+              xLeft={xLabel}
+              timestamps={ts}
             />
-            <span className="min-w-0 flex-1 truncate font-medium" title={task.target}>
-              {task.name}
-              <span className="ml-2 text-xs font-normal text-muted-foreground">{task.target}</span>
-            </span>
-            <span className="shrink-0 font-semibold tnum">
-              {r.success ? (
-                <span className={latColor(r.latencyMs)}>{r.latencyMs.toFixed(1)} ms</span>
-              ) : (
-                <span className="text-destructive">{t("timeout")}</span>
-              )}
-            </span>
-            <span className="w-16 shrink-0 text-right text-[11px] text-muted-foreground tnum">
-              {ago(r.ts)}
-            </span>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );

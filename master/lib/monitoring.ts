@@ -228,6 +228,52 @@ export async function savePingResults(results: PingResult[]): Promise<void> {
   );
 }
 
+// Latency history for ONE node, grouped by task. Each task gets the newest
+// `limitPerTask` points within the window, returned in chronological order.
+// Using ROW_NUMBER PARTITION keeps one busy task from starving the others
+// under a global LIMIT.
+export async function latencyHistoryForNode(
+  nodeId: string,
+  sinceMs: number | undefined,
+  limitPerTask: number,
+): Promise<Record<string, { ts: number; latencyMs: number; success: boolean }[]>> {
+  await ensureSchema();
+  const params: (string | number)[] = [nodeId, limitPerTask];
+  let timeFilter = "";
+  if (sinceMs && sinceMs > 0) {
+    params.push(sinceMs);
+    timeFilter = ` AND ts >= $${params.length}`;
+  }
+  const { rows } = await getPool().query<{
+    task_id: string;
+    ts: string;
+    latency_ms: number;
+    success: boolean;
+  }>(
+    `WITH ranked AS (
+       SELECT task_id, ts, latency_ms, success,
+              ROW_NUMBER() OVER (PARTITION BY task_id ORDER BY ts DESC) AS rn
+         FROM ping_results
+        WHERE node_id = $1${timeFilter}
+     )
+     SELECT task_id, ts, latency_ms, success
+       FROM ranked
+      WHERE rn <= $2
+      ORDER BY task_id, ts ASC`,
+    params,
+  );
+  const out: Record<string, { ts: number; latencyMs: number; success: boolean }[]> = {};
+  for (const r of rows) {
+    const key = r.task_id;
+    (out[key] ??= []).push({
+      ts: Number(r.ts),
+      latencyMs: r.latency_ms,
+      success: r.success,
+    });
+  }
+  return out;
+}
+
 // Latest latency per (task, node) for the dashboard.
 export async function latestPingResults(): Promise<PingResult[]> {
   await ensureSchema();
