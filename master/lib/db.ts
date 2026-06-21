@@ -515,7 +515,7 @@ export async function getHistory(
 }
 
 // pruneHistory trims rows older than the retention window (best-effort).
-export async function pruneHistory(retentionMs = 6 * 60 * 60 * 1000) {
+export async function pruneHistory(retentionMs = 30 * 24 * 60 * 60 * 1000) {
   try {
     await getPool().query(`DELETE FROM metrics_history WHERE ts < $1`, [
       Date.now() - retentionMs,
