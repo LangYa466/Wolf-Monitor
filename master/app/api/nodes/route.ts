@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { isPublicDashboard, listNodes, publicNodes } from "@/lib/db";
 import { currentUser } from "@/lib/session";
 
-// Polled by the dashboard for live updates (works on Vercel and self-host).
+// Polled by the dashboard for live updates.
 // Signed-in admins get the full payload; if the public dashboard is enabled,
 // guests get a sanitized payload (IP stripped); otherwise 401.
 export const runtime = "nodejs";

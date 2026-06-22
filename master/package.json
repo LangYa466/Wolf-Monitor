@@ -1,14 +1,14 @@
 {
   "name": "wolf-monitor-master",
-  "version": "1.5.2",
+  "version": "1.5.5",
   "private": true,
   "packageManager": "pnpm@10.32.1",
   "scripts": {
     "dev": "next dev",
-    "dev:ws": "node server.js",
+    "dev:ws": "tsx server.ts",
     "build": "next build",
     "start": "next start",
-    "start:ws": "NODE_ENV=production node server.js",
+    "start:ws": "NODE_ENV=production tsx server.ts",
     "lint": "next lint"
   },
   "dependencies": {
@@ -22,6 +22,14 @@
     "tailwind-merge": "^2.6.0",
     "ws": "^8.18.0"
   },
+  "overrides": {
+    "postcss": "^8.5.10"
+  },
+  "pnpm": {
+    "overrides": {
+      "postcss": "^8.5.10"
+    }
+  },
   "devDependencies": {
     "@types/node": "^22.10.5",
     "@types/pg": "^8.11.10",
@@ -29,8 +37,9 @@
     "@types/react-dom": "^19.0.3",
     "@types/ws": "^8.5.13",
     "autoprefixer": "^10.4.20",
-    "postcss": "^8.5.1",
+    "postcss": "^8.5.10",
     "tailwindcss": "^3.4.17",
+    "tsx": "^4.19.2",
     "typescript": "^5.7.3"
   }
 }

@@ -4,8 +4,8 @@ import { evaluate } from "@/lib/monitoring";
 import { pruneHistory } from "@/lib/db";
 
 // Evaluation tick: checks load-alert rules and offline status, dispatches
-// notifications on state transitions. Triggered by Vercel Cron (see
-// vercel.json), the self-host server loop, or any external pinger.
+// notifications on state transitions. Triggered by the self-host server loop
+// or any external pinger.
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 

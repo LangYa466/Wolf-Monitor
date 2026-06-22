@@ -25,7 +25,7 @@ Two parts:
 | Folder | What | Stack |
 |--------|------|-------|
 | [`node/`](node) | The probe agent that runs on each monitored machine. Samples **CPU, memory, disk usage + IO read/write, network**, and runs assigned **TCP/ICMP latency probes**. | Go · Windows + Linux |
-| [`master/`](master) | SSR dashboard (overview grid + per-server charts, country flags, drag-sort, status/region filters, email/password login) + ingestion API, **load/offline/latency alerts** with Telegram & webhook notifications. One env var (`DATABASE_URL`); all else in DB. | Next.js · WebSocket / HTTP · Vercel + CDN |
+| [`master/`](master) | SSR dashboard (overview grid + per-server charts, country flags, drag-sort, status/region filters, email/password login) + ingestion API, **load/offline/latency alerts** with Telegram & webhook notifications. One env var (`DATABASE_URL`); all else in DB. | Next.js · WebSocket / HTTP · self-host |
 
 ## How it fits together
 
@@ -40,8 +40,8 @@ Two parts:
 ```
 
 - **Node** collects metrics every few seconds and reports them. It speaks
-  **WebSocket** by default (lowest latency, self-host) or **HTTP** for serverless
-  masters.
+  **WebSocket** by default (lowest latency) or **HTTP** as a fallback for
+  deployments that can't hold a persistent connection.
 - **Master** authenticates each node with a shared **node token** (generated at
   setup), writes the latest state + a history row to **PostgreSQL**, and serves a
   live dashboard.
@@ -68,14 +68,12 @@ with its country flag.
 
 ## Deploy
 
-- **Master on Vercel**: import `master/` as a Next.js project, set only
-  `DATABASE_URL`, deploy, then complete `/setup`. Run nodes with
-  `-transport http -e https://<app>.vercel.app -t <NODE_TOKEN>`. Works behind
-  Cloudflare/any CDN.
-- **Master self-hosted**: `pnpm start:ws` serves the dashboard and the node
-  websocket on one port.
+- **Master**: self-host with `pnpm start:ws` — one process serves the dashboard
+  and the node WebSocket on a single port. Put it behind Cloudflare / any reverse
+  proxy if you need TLS, geo-routing, or DDoS protection.
 - **Node**: cross-compile for Linux/Windows (`GOOS=... go build`) and run as a
-  systemd service / Windows service.
+  systemd service / Windows service. Use `transport: http` to `/api/report` if
+  your master sits behind something that can't proxy WebSockets.
 
 See [`node/README.md`](node/README.md) and [`master/README.md`](master/README.md)
 for full details.

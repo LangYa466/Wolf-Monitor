@@ -2,13 +2,14 @@
 
 SSR dashboard + ingestion API for the [`wolf-node`](../node) probes. Built with
 **Next.js (App Router)**, stores data in **remote PostgreSQL**, and accepts node
-reports over **WebSocket** (self-host) or **HTTP** (Vercel / serverless).
+reports over **WebSocket** (recommended) or **HTTP** (fallback for proxies that
+can't carry WebSockets).
 
 ## Architecture
 
 ```
                  ┌──────────────────────── master ────────────────────────┐
-  wolf-node ──ws─┤ server.js  ──► /api/report ──┐                          │
+  wolf-node ──ws─┤ server.ts  ──► /api/report ──┐                          │
   wolf-node ─http┤ /api/report ─────────────────┼─► lib/db.ts ─► PostgreSQL│
                  │                               │        ▲                 │
    browser ◄─SSR─┤ app/page.tsx ─────────────────┘        │                 │
@@ -17,12 +18,12 @@ reports over **WebSocket** (self-host) or **HTTP** (Vercel / serverless).
 ```
 
 - **Node → master**: `ws` nodes connect to `/api/ws/node` (handled by
-  `server.js`); `http` nodes POST to `/api/report`. Both authenticate with the
+  `server.ts`); `http` nodes POST to `/api/report`. Both authenticate with the
   **node token** (generated at setup, shown on the Settings page) and end up in
   the same `saveReport()` path.
 - **Master → browser**: the page is server-rendered from the DB on first paint,
-  then the client polls `/api/nodes` every 3s. Polling works on every host
-  (Vercel included); the websocket is only for the node side.
+  then the client polls `/api/nodes` every 3s. The websocket is only for the
+  node side.
 
 ## Configuration — one env var
 
@@ -34,8 +35,8 @@ On first visit the app redirects to **`/setup`** to create the admin account
 (email + password; the form follows Google standards so the browser/password
 manager offers to generate & save a strong password). After that, **`/login`**
 guards the Settings page. Login is rate-limited (per-IP and per-email, DB-backed
-so it holds across serverless instances). The dashboard and `/latency` pages
-are public status views.
+so the counter survives restarts). The dashboard and `/latency` pages are public
+status views.
 
 ## Country, sorting, CDN
 
@@ -84,25 +85,6 @@ Open the app, complete `/setup` to create the admin account, then copy the
 ../node/wolf-node -e http://localhost:3000 -t "<NODE_TOKEN>" -transport http
 ```
 
-## Deploy to Vercel
-
-Vercel runs serverless functions and **cannot hold a websocket**, so on Vercel
-nodes must use `transport: http` → `/api/report`. Everything else is unchanged.
-
-1. Push this `master/` directory to a Git repo and import it on Vercel (root
-   directory = `master`).
-2. Set the one env var in the Vercel dashboard:
-   - `DATABASE_URL` — your remote Postgres URL (use the **pooled** connection
-     string from Neon/Supabase for serverless).
-3. Deploy, open `https://<app>.vercel.app`, and complete `/setup`.
-4. Copy the node token from Settings → Servers and run nodes with:
-   ```sh
-   wolf-node -e https://<app>.vercel.app -t <NODE_TOKEN> -transport http
-   ```
-
-Works the same behind Cloudflare or any CDN — point the CDN at the Vercel app
-and use the CDN hostname as the node endpoint.
-
 ## Self-host (with node WebSocket)
 
 ```sh
@@ -110,28 +92,27 @@ pnpm build
 DATABASE_URL=postgres://... PORT=8080 pnpm start:ws
 ```
 
-`server.js` serves both the dashboard and the `/api/ws/node` websocket on the
+`server.ts` serves both the dashboard and the `/api/ws/node` websocket on the
 same port.
 
 ## Monitoring & notifications
 
 Configured from the **Settings** page (`/settings`). Evaluation is **self-driven**:
 every node report triggers a throttled evaluation (~once/min, claimed atomically),
-and the self-host `server.js` also runs a 30s loop. **No external cron or Vercel
-Cron is required** — alerts work on any host (including Vercel Hobby) as long as a
-node is reporting.
+and the self-host `server.ts` also runs a 30s loop. **No external cron is
+required** — alerts work as long as a node is reporting.
 
-- **负载通知 / Load alerts** — fire when a metric (CPU / RAM / DISK) stays at or
+- **Load alerts** — fire when a metric (CPU / RAM / DISK) stays at or
   above a threshold for at least a *time-ratio* of the samples within a trailing
   *window* (e.g. CPU ≥ 80% for 80% of the last 15 min). Per-server or all servers.
-- **离线通知 / Offline alerts** — per-server, with a grace period (e.g. 180s).
+- **Offline alerts** — per-server, with a grace period (e.g. 180s).
   Notifies when a node stops reporting and again when it recovers.
-- **延迟监测 / Latency monitors** — selected nodes probe a target over **TCP** or
+- **Latency monitors** — selected nodes probe a target over **TCP** or
   **ICMP** every N seconds; results are charted under `/latency`. Nodes pull
   their assignments from `/api/tasks` and POST samples to `/api/ping`.
 
 Notifications fire on state transitions (and re-notify a sustained issue every
-30 min). Configure them from **Settings → 通知 / Notifications** (stored in the
+30 min). Configure them from **Settings → Notifications** (stored in the
 DB) or via environment variables as a fallback:
 
 - **Enable toggle** + a **message template** with placeholders `{{emoji}}`,
@@ -162,12 +143,12 @@ Only `DATABASE_URL` is required; the rest are rarely-needed optionals.
 | Var | Required | Notes |
 |-----|----------|-------|
 | `DATABASE_URL` | **yes** | remote PostgreSQL connection string |
-| `CRON_SECRET` | no | optional: secures `/api/cron/check` for the all-nodes-down edge case (Vercel Cron sends it automatically if you re-enable a cron) |
+| `CRON_SECRET` | no | optional: secures `/api/cron/check` for the all-nodes-down edge case (send via `Authorization: Bearer <secret>`) |
 | `NOTIFY_TELEGRAM_TOKEN` / `NOTIFY_TELEGRAM_CHAT` / `NOTIFY_WEBHOOK_URL` | no | notification fallback when not configured in Settings |
 | `PG_POOL_MAX` | no | max pool connections (default 4) |
 | `PGSSL` | no | set to `disable` to turn off SSL |
 | `EVAL_INTERVAL_MS` | no | self-host eval loop interval (default 30000) |
-| `PORT` / `HOST` | no | only used by `server.js` (self-host), default 8080 / 0.0.0.0 |
+| `PORT` / `HOST` | no | only used by `server.ts` (self-host), default 8080 / 0.0.0.0 |
 
 Configured in the dashboard (DB-backed) instead of env: **admin account**,
 **node token**, **ipinfo token**, **notification channels**.

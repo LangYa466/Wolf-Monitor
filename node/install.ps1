@@ -1,6 +1,6 @@
 # wolf-node one-click installer (Windows).
 #
-#   powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "iwr 'https://raw.githubusercontent.com/LangYa466/Wolf-Monitor/main/node/install.ps1' -UseBasicParsing -OutFile 'install.ps1'; & '.\install.ps1' '-e' 'https://lg.langya.io' '-t' 'YOUR_TOKEN'"
+#   powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; iwr 'https://raw.githubusercontent.com/LangYa466/Wolf-Monitor/main/node/install.ps1' -UseBasicParsing -OutFile 'install.ps1'; & '.\install.ps1' '-e' 'https://lg.langya.io' '-t' 'YOUR_TOKEN'"
 #
 # Optional GitHub proxy:
 #   & '.\install.ps1' '-e' 'https://lg.langya.io' '-t' 'YOUR_TOKEN' '-Proxy' 'https://ghfast.top'
@@ -12,10 +12,13 @@ param(
   [Alias("T")][string]$Transport = "ws",
   [Alias("i")][int]$Interval = 3,
   [Alias("V")][string]$Version = "latest",
-  [switch]$Insecure
+  [switch]$Insecure,
+  [switch]$NoVerifyChecksum
 )
 
 $ErrorActionPreference = "Stop"
+# Windows PowerShell 5.x defaults to TLS 1.0/1.1 which github.com / proxies reject.
+try { [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12 } catch {}
 $Repo = if ($env:WOLF_REPO) { $env:WOLF_REPO } else { "LangYa466/Wolf-Monitor" }
 $InstallDir = "$env:ProgramData\wolf"
 $Bin = Join-Path $InstallDir "wolf-node.exe"
@@ -37,11 +40,17 @@ $asset = "wolf-node_windows_$arch.exe"
 
 # ── download URL (+ optional proxy) ─────────────────────────────────────────
 if ($Version -eq "latest") {
-  $url = "https://github.com/$Repo/releases/latest/download/$asset"
+  $baseUrl = "https://github.com/$Repo/releases/latest/download"
 } else {
-  $url = "https://github.com/$Repo/releases/download/$Version/$asset"
+  $baseUrl = "https://github.com/$Repo/releases/download/$Version"
 }
-if ($Proxy) { $url = ($Proxy.TrimEnd('/')) + "/" + $url }
+$url = "$baseUrl/$asset"
+$sumDirect = "$baseUrl/SHA256SUMS"        # trust anchor — never via proxy first
+$sumProxied = $sumDirect
+if ($Proxy) {
+  $url = ($Proxy.TrimEnd('/')) + "/" + $url
+  $sumProxied = ($Proxy.TrimEnd('/')) + "/" + $sumDirect
+}
 
 Info "platform: windows/$arch"
 Info "download:  $url"
@@ -56,7 +65,54 @@ if (Get-Service -Name $ServiceName -ErrorAction SilentlyContinue) {
   Start-Sleep -Seconds 1
 }
 
-Invoke-WebRequest -Uri $url -UseBasicParsing -OutFile $Bin
+$tmp = [System.IO.Path]::Combine($env:TEMP, "wolf-node-$([System.Guid]::NewGuid().ToString('N')).bin")
+Invoke-WebRequest -Uri $url -UseBasicParsing -OutFile $tmp
+
+# ── verify SHA256 against the release manifest ──────────────────────────────
+# Always pull the manifest from github.com directly so a malicious proxy can't
+# swap both binary and checksum. Falls back to the proxied manifest with a
+# warning when github.com is unreachable; -NoVerifyChecksum is the opt-out.
+if ($NoVerifyChecksum) {
+  Info "WARNING: -NoVerifyChecksum used — skipping integrity check"
+} else {
+  $sumFile = [System.IO.Path]::Combine($env:TEMP, "wolf-node-sums-$([System.Guid]::NewGuid().ToString('N')).txt")
+  $sumsOk = $false
+  try {
+    Invoke-WebRequest -Uri $sumDirect -UseBasicParsing -OutFile $sumFile -TimeoutSec 60
+    $sumsOk = $true
+  } catch {
+    if ($Proxy) {
+      try {
+        Invoke-WebRequest -Uri $sumProxied -UseBasicParsing -OutFile $sumFile -TimeoutSec 60
+        Info "WARNING: SHA256SUMS fetched via proxy — checksum is only as trustworthy as the proxy"
+        $sumsOk = $true
+      } catch { }
+    }
+  }
+  if (-not $sumsOk) {
+    Remove-Item $tmp -ErrorAction SilentlyContinue
+    throw "failed to fetch SHA256SUMS from $sumDirect (rerun with -NoVerifyChecksum to skip — NOT recommended)"
+  }
+  $expected = $null
+  Get-Content $sumFile | ForEach-Object {
+    if ($_ -match "^([0-9a-fA-F]{64})\s+\*?($([regex]::Escape($asset)))\s*$") {
+      $expected = $Matches[1].ToLower()
+    }
+  }
+  Remove-Item $sumFile -ErrorAction SilentlyContinue
+  if (-not $expected) {
+    Remove-Item $tmp -ErrorAction SilentlyContinue
+    throw "no SHA256 entry for $asset in manifest"
+  }
+  $actual = (Get-FileHash -Algorithm SHA256 -Path $tmp).Hash.ToLower()
+  if ($expected -ne $actual) {
+    Remove-Item $tmp -ErrorAction SilentlyContinue
+    throw "checksum mismatch! expected=$expected actual=$actual — refusing to install"
+  }
+  Info "checksum OK (sha256=$actual)"
+}
+
+Move-Item -Force -Path $tmp -Destination $Bin
 
 # ── build argument string ───────────────────────────────────────────────────
 $argList = "-e `"$Endpoint`" -t `"$Token`" -transport $Transport -interval $Interval"

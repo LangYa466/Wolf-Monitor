@@ -1,8 +1,9 @@
-# wolf-node (探针 / probe)
+# wolf-node (probe)
 
 Cross-platform monitoring agent written in Go. Samples the host and reports to a
-[`master`](../master) over **websocket** (default) or **http** (for serverless /
-Vercel masters). Inspired by [komari-monitor-rs](https://github.com/GenshinMinecraft/komari-monitor-rs).
+[`master`](../master) over **websocket** (default) or **http** (fallback for
+masters sitting behind a proxy that can't carry WebSockets). Inspired by
+[komari-monitor-rs](https://github.com/GenshinMinecraft/komari-monitor-rs).
 
 ## Collected metrics
 
@@ -32,13 +33,13 @@ wget -qO- https://raw.githubusercontent.com/LangYa466/Wolf-Monitor/main/node/ins
 **Windows** (elevated PowerShell)
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "iwr 'https://raw.githubusercontent.com/LangYa466/Wolf-Monitor/main/node/install.ps1' -UseBasicParsing -OutFile 'install.ps1'; & '.\install.ps1' '-e' 'https://lg.langya.io' '-t' 'YOUR_TOKEN'"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; iwr 'https://raw.githubusercontent.com/LangYa466/Wolf-Monitor/main/node/install.ps1' -UseBasicParsing -OutFile 'install.ps1'; & '.\install.ps1' '-e' 'https://lg.langya.io' '-t' 'YOUR_TOKEN'"
 ```
 
 **Optional GitHub proxy** (faster downloads in some regions) — append
 `-p https://ghfast.top` (Linux) or `'-Proxy' 'https://ghfast.top'` (Windows).
 
-Other flags: `-T http` (transport, use for a Vercel master), `-i 5` (interval),
+Other flags: `-T http` (transport, use when the master can't proxy WebSockets), `-i 5` (interval),
 `-V v1.0.0` (pin a release). Binaries come from the repo's GitHub Releases
 (built by `.github/workflows/release.yml`).
 
@@ -78,11 +79,11 @@ WOLF_CONFIG=/etc/wolf.json ./wolf-node
 |-----|------|-----|---------|-------|
 | master | `-master` | `WOLF_MASTER` | `ws://127.0.0.1:8080` | `ws://`, `wss://`, `http://`, or `https://` — auto-normalised per transport |
 | token | `-token` | `WOLF_TOKEN` | _(empty)_ | shared secret, must match master's `NODE_TOKEN` |
-| transport | `-transport` | `WOLF_TRANSPORT` | `ws` | `ws` or `http`. Use `http` for a Vercel master. |
+| transport | `-transport` | `WOLF_TRANSPORT` | `ws` | `ws` or `http`. Use `http` when the master sits behind a proxy that can't carry WebSockets. |
 | interval | `-interval` | `WOLF_INTERVAL` | `3` | seconds between reports |
 | insecure | `-insecure` | `WOLF_INSECURE` | `false` | skip TLS verification |
 
-## Latency monitoring (延迟监测)
+## Latency monitoring
 
 The node also pulls **TCP/ICMP latency probes** assigned to it from the master
 (`GET /api/tasks`) and reports samples back (`POST /api/ping`) — both over HTTP,
@@ -98,9 +99,9 @@ this host from the master's **Settings** page.
 ## Transport choice
 
 - **ws** — the node holds a persistent websocket to `/api/ws/node`. Use this
-  with a self-hosted master (`node server.js`). Lowest latency, auto-reconnect.
-- **http** — the node POSTs each sample to `/api/report`. Use this with a master
-  deployed to **Vercel** (serverless functions can't keep a socket open).
+  with a self-hosted master (`pnpm start:ws`). Lowest latency, auto-reconnect.
+- **http** — the node POSTs each sample to `/api/report`. Use this when the
+  master is behind a proxy / CDN tier that can't carry a persistent WebSocket.
 
 ## Run as a service (Linux, systemd)
 

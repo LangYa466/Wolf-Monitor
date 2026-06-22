@@ -1,5 +1,4 @@
-/** @type {import('postcss-load-config').Config} */
-const config = {
+const config: { plugins: Record<string, Record<string, unknown>> } = {
   plugins: {
     tailwindcss: {},
     autoprefixer: {},

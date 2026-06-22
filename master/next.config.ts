@@ -1,10 +1,10 @@
-import { fileURLToPath } from "url";
 import { dirname } from "path";
+import { fileURLToPath } from "url";
+import type { NextConfig } from "next";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-/** @type {import('next').NextConfig} */
-const nextConfig = {
+const nextConfig: NextConfig = {
   reactStrictMode: true,
   // `pg` and `ws` are server-only native-ish deps; keep them external so Next
   // doesn't try to bundle them into serverless/edge function output.

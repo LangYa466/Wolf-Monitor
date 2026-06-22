@@ -14,7 +14,7 @@ import (
 )
 
 // HTTPReporter POSTs each report to the master's /api/report endpoint. This is
-// the transport to use against serverless masters (Vercel) which cannot hold a
+// the transport to use when the master sits behind a proxy that cannot carry a
 // persistent websocket.
 type HTTPReporter struct {
 	url    string

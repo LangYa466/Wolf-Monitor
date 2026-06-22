@@ -1,5 +1,5 @@
 // Client-IP extraction that trusts CDN / reverse-proxy headers. Works behind
-// Cloudflare, Vercel, nginx, etc. Order reflects specificity.
+// Cloudflare, nginx, etc. Order reflects specificity.
 
 export function clientIp(headers: Headers): string | null {
   const candidates = [
@@ -7,7 +7,6 @@ export function clientIp(headers: Headers): string | null {
     headers.get("true-client-ip"), // Cloudflare Enterprise / Akamai
     headers.get("x-real-ip"), // nginx
     firstForwarded(headers.get("x-forwarded-for")), // standard proxy chain
-    headers.get("x-vercel-forwarded-for"),
   ];
   for (const c of candidates) {
     const ip = normalize(c);

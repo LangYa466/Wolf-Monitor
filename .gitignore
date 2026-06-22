@@ -19,3 +19,6 @@ next-env.d.ts
 # OS
 .DS_Store
 Thumbs.db
+
+# local security audit artifacts (not for VCS)
+.security-audit-full.json

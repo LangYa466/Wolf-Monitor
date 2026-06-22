@@ -7,7 +7,8 @@ import { maybeEvaluate } from "@/lib/monitoring";
 import type { Report } from "@/lib/types";
 
 // HTTP ingestion endpoint used by nodes running with `transport: http`
-// (the Vercel-friendly path). Force the Node.js runtime since `pg` needs it.
+// (when the master sits behind a proxy that can't carry WebSockets).
+// Force the Node.js runtime since `pg` needs it.
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
@@ -41,8 +42,8 @@ export async function POST(req: NextRequest) {
     }
     const node = await saveReport(body, { ip, country });
     // Drive alert/offline evaluation off node traffic (throttled), so alerts
-    // work even where there's no frequent cron (Vercel Hobby). Runs after the
-    // response via waitUntil, so it never delays the node.
+    // work even when no external cron is configured. Runs after the response
+    // via waitUntil, so it never delays the node.
     after(async () => {
       try {
         await maybeEvaluate();

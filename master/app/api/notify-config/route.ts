@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { currentUser } from "@/lib/session";
 import { getSetting, setSetting } from "@/lib/db";
-import { defaultNotifyConfig } from "@/lib/notify";
+import { assertPublicUrl, defaultNotifyConfig } from "@/lib/notify";
 import type { NotifyConfig } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -40,6 +40,32 @@ export async function POST(req: NextRequest) {
         endpoint: body.telegram?.endpoint?.trim() || base.telegram.endpoint,
       },
     };
+    // Write-time SSRF guard: reject private/loopback/non-https targets up front
+    // so a bad URL never reaches app_settings (defends DNS rebind too via
+    // send-time re-check). Empty webhookUrl is allowed (= disabled).
+    if (config.webhookUrl) {
+      try {
+        await assertPublicUrl(config.webhookUrl);
+      } catch (e) {
+        return NextResponse.json(
+          { error: `webhookUrl rejected: ${(e as Error).message}` },
+          { status: 400 },
+        );
+      }
+    }
+    if (config.telegram.endpoint) {
+      // Telegram endpoint is the base URL; assertPublicUrl needs a parseable
+      // URL, so build a representative full URL for the check.
+      const probe = config.telegram.endpoint.replace(/\/+$/, "") + "X/sendMessage";
+      try {
+        await assertPublicUrl(probe);
+      } catch (e) {
+        return NextResponse.json(
+          { error: `telegram endpoint rejected: ${(e as Error).message}` },
+          { status: 400 },
+        );
+      }
+    }
     await setSetting("notify", config);
     return NextResponse.json({ config });
   } catch (err) {

@@ -1,23 +1,24 @@
 name: ci
 
-# Only guards the Go agent — `master/` is already built by Vercel preview on
-# every PR / push, so duplicating it here just burns Actions minutes.
+# Build + lint both halves of the repo. Each job is gated by path filters so
+# only the changed half runs on a given PR.
 on:
   pull_request:
     branches: [main]
     paths:
       - "node/**"
+      - "master/**"
       - ".github/workflows/ci.yml"
   push:
     branches: [main]
     paths:
       - "node/**"
+      - "master/**"
       - ".github/workflows/ci.yml"
 
 permissions:
   contents: read
 
-# Cancel in-flight runs on the same ref when a newer commit lands.
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
@@ -37,3 +38,23 @@ jobs:
         run: |
           go vet ./...
           go build ./...
+
+  master:
+    name: master · next build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.32.1
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          cache: pnpm
+          cache-dependency-path: master/pnpm-lock.yaml
+      - name: install
+        working-directory: master
+        run: pnpm install --frozen-lockfile
+      - name: build
+        working-directory: master
+        run: pnpm build

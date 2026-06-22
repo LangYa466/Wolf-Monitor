@@ -33,6 +33,7 @@ while [ $# -gt 0 ]; do
     -i|--interval) INTERVAL="$2"; shift 2;;
     -V|--version)  VERSION="$2"; shift 2;;
     --insecure)    INSECURE="1"; shift;;
+    --no-verify-checksum) NO_VERIFY_CHECKSUM="1"; shift;;
     *) err "unknown argument: $1";;
   esac
 done
@@ -57,12 +58,16 @@ ASSET="wolf-node_${OS}_${ARCH}"
 
 # ── build download URL (+ optional proxy) ───────────────────────────────────
 if [ "$VERSION" = "latest" ]; then
-  URL="https://github.com/${REPO}/releases/latest/download/${ASSET}"
+  BASE_URL="https://github.com/${REPO}/releases/latest/download"
 else
-  URL="https://github.com/${REPO}/releases/download/${VERSION}/${ASSET}"
+  BASE_URL="https://github.com/${REPO}/releases/download/${VERSION}"
 fi
+URL="${BASE_URL}/${ASSET}"
+SUM_URL_DIRECT="${BASE_URL}/SHA256SUMS"   # always via github.com — the trust anchor
+SUM_URL_PROXIED="${SUM_URL_DIRECT}"        # fallback when github.com is unreachable
 if [ -n "$PROXY" ]; then
   URL="${PROXY%/}/${URL}"
+  SUM_URL_PROXIED="${PROXY%/}/${SUM_URL_DIRECT}"
 fi
 
 info "platform: ${OS}/${ARCH}"
@@ -77,16 +82,61 @@ elif [ "$OS" = "darwin" ]; then
 fi
 
 mkdir -p "$INSTALL_DIR"
+
+fetch() {
+  # $1 url, $2 out
+  if command -v curl >/dev/null 2>&1; then
+    curl -fsSL --max-time 60 "$1" -o "$2"
+  elif command -v wget >/dev/null 2>&1; then
+    wget -qO "$2" "$1"
+  else
+    err "need curl or wget"
+  fi
+}
+
 # Download to a temp file then move into place, so a failed/partial download
 # never clobbers a working binary.
 TMP="$(mktemp)"
-if command -v curl >/dev/null 2>&1; then
-  curl -fsSL "$URL" -o "$TMP" || err "download failed"
-elif command -v wget >/dev/null 2>&1; then
-  wget -qO "$TMP" "$URL" || err "download failed"
+fetch "$URL" "$TMP" || err "download failed"
+
+# ── verify SHA256 against the release manifest ──────────────────────────────
+# We always try github.com directly first so a malicious proxy can't swap both
+# the binary AND its checksum. If github.com is unreachable (e.g. mainland CN
+# without a proxy able to reach it), fall back to the proxied manifest with a
+# loud warning. `--no-verify-checksum` is an explicit opt-out for emergencies.
+if [ "${NO_VERIFY_CHECKSUM:-0}" = "1" ]; then
+  info "WARNING: --no-verify-checksum used — skipping integrity check"
 else
-  err "need curl or wget"
+  SUMS="$(mktemp)"
+  if ! fetch "$SUM_URL_DIRECT" "$SUMS" 2>/dev/null; then
+    if [ -n "$PROXY" ] && fetch "$SUM_URL_PROXIED" "$SUMS" 2>/dev/null; then
+      info "WARNING: SHA256SUMS fetched via proxy — checksum is only as trustworthy as the proxy"
+    else
+      rm -f "$SUMS" "$TMP"
+      err "failed to fetch SHA256SUMS from ${SUM_URL_DIRECT} (rerun with --no-verify-checksum to skip — NOT recommended)"
+    fi
+  fi
+  EXPECTED="$(grep -E "[[:space:]]${ASSET}\$" "$SUMS" | awk '{print $1}')"
+  if [ -z "$EXPECTED" ]; then
+    rm -f "$SUMS" "$TMP"
+    err "no SHA256 entry for ${ASSET} in manifest"
+  fi
+  if command -v sha256sum >/dev/null 2>&1; then
+    ACTUAL="$(sha256sum "$TMP" | awk '{print $1}')"
+  elif command -v shasum >/dev/null 2>&1; then
+    ACTUAL="$(shasum -a 256 "$TMP" | awk '{print $1}')"
+  else
+    rm -f "$SUMS" "$TMP"
+    err "need sha256sum or shasum to verify download integrity"
+  fi
+  rm -f "$SUMS"
+  if [ "$EXPECTED" != "$ACTUAL" ]; then
+    rm -f "$TMP"
+    err "checksum mismatch! expected=$EXPECTED actual=$ACTUAL — refusing to install"
+  fi
+  info "checksum OK (sha256=${ACTUAL})"
 fi
+
 chmod +x "$TMP"
 mv -f "$TMP" "$BIN"
 

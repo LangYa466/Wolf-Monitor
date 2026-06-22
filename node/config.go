@@ -12,12 +12,12 @@ import (
 // Resolution order (later wins): defaults -> config.json -> env vars -> flags.
 type Config struct {
 	// Master is the base URL of the master, e.g. "ws://1.2.3.4:8080" for the
-	// websocket transport, or "https://my-app.vercel.app" for http transport.
+	// websocket transport, or "https://master.example.com" for http transport.
 	Master string `json:"master"`
 	// Token authenticates this node with the master.
 	Token string `json:"token"`
-	// Transport is "ws" (default) or "http". Use "http" for Vercel/serverless
-	// masters that cannot hold a persistent websocket.
+	// Transport is "ws" (default) or "http". Use "http" when the master sits
+	// behind a proxy that cannot carry a persistent websocket.
 	Transport string `json:"transport"`
 	// Interval is the sampling/report interval in seconds.
 	Interval int `json:"interval"`

@@ -9,8 +9,70 @@
 //   {{emoji}}  -> the level tag     {{event}}  -> event name
 //   {{client}} -> server / node id  {{message}}-> details   {{time}} -> timestamp
 
+import { lookup } from "dns/promises";
+import { isIP } from "net";
 import { getSetting } from "./db";
 import type { NotifyConfig } from "./types";
+
+// Outbound HTTP timeout for notification calls. Bounded so a slow/blackholed
+// target can't pile up requests indefinitely.
+const NOTIFY_FETCH_TIMEOUT_MS = 5000;
+
+// Reject URLs that point at loopback / link-local / private / multicast / etc.
+// IP literals or DNS names that resolve into them. Without this any admin (or
+// hijacked admin account) can pivot the master into the internal network /
+// cloud metadata service via the configurable webhook + Telegram endpoint.
+function isPrivateV4(ip: string): boolean {
+  const m = ip.match(/^(\d+)\.(\d+)\.(\d+)\.(\d+)$/);
+  if (!m) return false;
+  const a = +m[1], b = +m[2];
+  if (a === 10) return true;
+  if (a === 127) return true;
+  if (a === 0) return true;
+  if (a === 169 && b === 254) return true; // link-local + AWS/GCP metadata
+  if (a === 172 && b >= 16 && b <= 31) return true;
+  if (a === 192 && b === 168) return true;
+  if (a === 100 && b >= 64 && b <= 127) return true; // CGNAT
+  if (a >= 224) return true; // multicast + reserved
+  return false;
+}
+function isPrivateV6(ip: string): boolean {
+  const lower = ip.toLowerCase();
+  if (lower === "::1" || lower === "::") return true;
+  if (lower.startsWith("fe80:") || lower.startsWith("fec0:")) return true;
+  if (lower.startsWith("fc") || lower.startsWith("fd")) return true; // ULA
+  if (lower.startsWith("ff")) return true; // multicast
+  if (lower.startsWith("::ffff:")) {
+    const v4 = lower.slice(7);
+    if (isIP(v4) === 4) return isPrivateV4(v4);
+  }
+  return false;
+}
+export async function assertPublicUrl(raw: string): Promise<URL> {
+  let u: URL;
+  try {
+    u = new URL(raw);
+  } catch {
+    throw new Error("invalid URL");
+  }
+  if (u.protocol !== "https:") {
+    throw new Error("notification URL must use https://");
+  }
+  const host = u.hostname;
+  const literal = isIP(host);
+  const addrs: Array<{ address: string; family: number }> = literal
+    ? [{ address: host, family: literal }]
+    : await lookup(host, { all: true });
+  for (const a of addrs) {
+    if (a.family === 4 && isPrivateV4(a.address)) {
+      throw new Error("notification URL resolves to a private address");
+    }
+    if (a.family === 6 && isPrivateV6(a.address)) {
+      throw new Error("notification URL resolves to a private address");
+    }
+  }
+  return u;
+}
 
 export type NotifyLevel = "alert" | "recovery" | "offline" | "online";
 
@@ -90,10 +152,13 @@ async function sendTelegram(cfg: NotifyConfig, text: string): Promise<void> {
   };
   if (messageThreadId) payload.message_thread_id = Number(messageThreadId);
   try {
+    await assertPublicUrl(url);
     const res = await fetch(url, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(NOTIFY_FETCH_TIMEOUT_MS),
+      redirect: "error",
     });
     if (!res.ok) {
       console.error("telegram notify failed:", res.status, await res.text().catch(() => ""));
@@ -113,10 +178,13 @@ async function sendWebhook(
 ): Promise<void> {
   if (!cfg.webhookUrl) return;
   try {
+    await assertPublicUrl(cfg.webhookUrl);
     const res = await fetch(cfg.webhookUrl, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ level, event, client, message, text, ts: Date.now() }),
+      signal: AbortSignal.timeout(NOTIFY_FETCH_TIMEOUT_MS),
+      redirect: "error",
     });
     if (!res.ok) console.error("webhook notify failed:", res.status);
   } catch (err) {

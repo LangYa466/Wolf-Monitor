@@ -5,9 +5,15 @@
 // (app_settings "nodeToken"), generated at setup. The ONLY required env var is
 // DATABASE_URL — everything here is DB-backed.
 
-import { randomBytes, scrypt, timingSafeEqual as nodeTSE } from "crypto";
+import { createHash, randomBytes, scrypt, timingSafeEqual as nodeTSE } from "crypto";
 import { promisify } from "util";
 import { getPool, getSetting, setSetting } from "./db";
+
+// Hash a session token before persisting / looking up. The plaintext lives
+// only in the user's cookie; a DB dump alone can no longer impersonate users.
+function hashToken(token: string): string {
+  return createHash("sha256").update(token).digest("hex");
+}
 
 const scryptAsync = promisify(scrypt);
 
@@ -57,6 +63,41 @@ export async function createUser(email: string, password: string): Promise<User>
   return { id: Number(rows[0].id), email: rows[0].email };
 }
 
+// First-run setup helper. Uses pg_advisory_xact_lock so two concurrent /setup
+// requests can't both pass the "no users yet" check and create two admins
+// (TOCTOU). Returns null if a user already exists.
+const SETUP_LOCK_KEY = 0x77_6f_6c_66; // 'wolf'
+export async function createUserExclusive(
+  email: string,
+  password: string,
+): Promise<User | null> {
+  const hash = await hashPassword(password);
+  const pool = getPool();
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query(`SELECT pg_advisory_xact_lock($1)`, [SETUP_LOCK_KEY]);
+    const { rows: existing } = await client.query<{ n: string }>(
+      `SELECT COUNT(*) AS n FROM users`,
+    );
+    if (Number(existing[0].n) > 0) {
+      await client.query("ROLLBACK");
+      return null;
+    }
+    const { rows } = await client.query<{ id: number; email: string }>(
+      `INSERT INTO users (email, password_hash) VALUES ($1, $2) RETURNING id, email`,
+      [email.toLowerCase().trim(), hash],
+    );
+    await client.query("COMMIT");
+    return { id: Number(rows[0].id), email: rows[0].email };
+  } catch (err) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
 export async function findUser(
   email: string
 ): Promise<{ id: number; email: string; passwordHash: string } | null> {
@@ -74,23 +115,26 @@ export async function findUser(
 // ── sessions ─────────────────────────────────────────────────────────────────
 
 export async function createSession(userId: number): Promise<{ token: string; expires: Date }> {
+  // Plaintext goes to the user's cookie; only the SHA-256 digest is persisted.
+  // A leaked DB therefore can't be replayed without the original cookie value.
   const token = randomBytes(32).toString("hex");
   const now = Date.now();
   const expires = now + SESSION_TTL_MS;
   await getPool().query(
     `INSERT INTO sessions (token, user_id, created_at, expires_at) VALUES ($1,$2,$3,$4)`,
-    [token, userId, now, expires]
+    [hashToken(token), userId, now, expires]
   );
   return { token, expires: new Date(expires) };
 }
 
 export async function sessionUser(token: string | undefined | null): Promise<User | null> {
   if (!token) return null;
+  const digest = hashToken(token);
   const { rows } = await getPool().query<{ id: number; email: string; expires_at: string }>(
     `SELECT u.id, u.email, s.expires_at
        FROM sessions s JOIN users u ON u.id = s.user_id
       WHERE s.token = $1`,
-    [token]
+    [digest]
   );
   if (rows.length === 0) return null;
   if (Number(rows[0].expires_at) < Date.now()) {
@@ -101,7 +145,7 @@ export async function sessionUser(token: string | undefined | null): Promise<Use
 }
 
 export async function deleteSession(token: string): Promise<void> {
-  await getPool().query(`DELETE FROM sessions WHERE token = $1`, [token]);
+  await getPool().query(`DELETE FROM sessions WHERE token = $1`, [hashToken(token)]);
 }
 
 // ── node ingestion tokens (DB-backed) ───────────────────────────────────────
@@ -222,6 +266,22 @@ export async function authorizeForHost(
   );
   if (rows.length) return rows[0].node_id === hostname;
   return legacyTokenMatch(provided);
+}
+
+// nodeForToken: returns the hostname a per-node token is bound to, or null
+// when the token is unbound, unknown, or the legacy shared token (which is
+// not bound to any specific node). Callers like /api/ping use this to clamp
+// inbound results to the caller's own nodeId, blocking cross-node spoofing.
+export async function nodeForToken(
+  provided: string | null | undefined,
+): Promise<string | null> {
+  if (!provided) return null;
+  const { rows } = await getPool().query<{ node_id: string | null }>(
+    `SELECT node_id FROM node_tokens WHERE token = $1`,
+    [provided],
+  );
+  if (rows.length && rows[0].node_id) return rows[0].node_id;
+  return null;
 }
 
 // authorizeAnyNode: gate for endpoints that don't pin a specific host (e.g.

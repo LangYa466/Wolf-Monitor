@@ -78,7 +78,7 @@ function InstallSnippet({
       </code>
       <div className="text-muted-foreground">{t("installWin")}</div>
       <code className="block break-all text-primary">
-        {`powershell -NoProfile -ExecutionPolicy Bypass -Command "iwr '${ps1Full}' -UseBasicParsing -OutFile 'install.ps1'; & '.\\install.ps1' '-e' '${base}' '-t' '${tok}' '-T' 'http'${ps1ProxyArg}"`}
+        {`powershell -NoProfile -ExecutionPolicy Bypass -Command "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; iwr '${ps1Full}' -UseBasicParsing -OutFile 'install.ps1'; & '.\\install.ps1' '-e' '${base}' '-t' '${tok}' '-T' 'http'${ps1ProxyArg}"`}
       </code>
       <div className="text-muted-foreground">{t("installWs")}</div>
     </div>
@@ -369,8 +369,8 @@ function ServersSection({
 
   const origin = typeof window !== "undefined" ? window.location.host : "your-master";
   const proto = typeof window !== "undefined" && window.location.protocol === "https:" ? "wss" : "ws";
-  // http(s) base for install commands. HTTP transport works on both Vercel
-  // (serverless can't hold a WebSocket) and self-host, so it's the safe default.
+  // http(s) base for install commands. HTTP transport works whether the master
+  // sits behind a WebSocket-capable proxy or not, so it's the safe default.
   const base = `${proto === "wss" ? "https" : "http"}://${origin}`;
   // Active GitHub mirror — empty when off. Falls back to ghfast.top when
   // enabled with a blank URL (the most common preset for mainland users).

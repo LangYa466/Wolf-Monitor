@@ -5,7 +5,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        Please check the [Troubleshooting](https://github.com/LangYa466/Wolf-Monitor/wiki/Caveats-and-Troubleshooting) page first — most issues (Vercel cron, DB TLS, transport choice, ICMP) are covered there.
+        Please check the [Troubleshooting](https://github.com/LangYa466/Wolf-Monitor/wiki/Caveats-and-Troubleshooting) page first — most issues (DB TLS, transport choice, ICMP) are covered there.
   - type: dropdown
     id: component
     attributes:
@@ -22,8 +22,8 @@ body:
     attributes:
       label: Master deployment
       options:
-        - Vercel
-        - Self-host (server.js)
+        - Self-host (server.ts, WebSocket)
+        - Self-host (HTTP transport / behind proxy)
         - Not applicable
     validations:
       required: true
