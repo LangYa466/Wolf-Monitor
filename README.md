@@ -13,13 +13,6 @@ A live overview grid plus a per-server detail page with real-time charts;
 bilingual UI (Traditional Chinese / English); login-required by default with an
 optional public guest view.
 
-**[Full documentation → the Wiki](https://github.com/LangYa466/Wolf-Monitor/wiki)** ·
-[Deploy](https://github.com/LangYa466/Wolf-Monitor/wiki/Deploy-Master) ·
-[Install nodes](https://github.com/LangYa466/Wolf-Monitor/wiki/Install-Nodes) ·
-[Configuration](https://github.com/LangYa466/Wolf-Monitor/wiki/Configuration) ·
-[FAQ](https://github.com/LangYa466/Wolf-Monitor/wiki/FAQ) ·
-[Troubleshooting](https://github.com/LangYa466/Wolf-Monitor/wiki/Caveats-and-Troubleshooting)
-
 Two parts:
 
 | Folder | What | Stack |
@@ -45,26 +38,6 @@ Two parts:
 - **Master** authenticates each node with a shared **node token** (generated at
   setup), writes the latest state + a history row to **PostgreSQL**, and serves a
   live dashboard.
-
-## Quick start
-
-```sh
-# 1. master — set DATABASE_URL, then run
-cd master
-cp .env.example .env
-pnpm install
-pnpm dev:ws            # http://localhost:8080 (+ node websocket)
-# open http://localhost:8080 → complete /setup (email + password),
-# then copy the node token from Settings → Servers
-
-# 2. node — build and point it at the master with that token
-cd ../node
-go build -o wolf-node .
-./wolf-node -e ws://localhost:8080 -t "<NODE_TOKEN>"
-```
-
-The machine running the node appears on the dashboard within a few seconds —
-with its country flag.
 
 ## Deploy
 
