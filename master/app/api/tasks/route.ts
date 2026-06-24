@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { authorizeForHost, tokenFromHeader } from "@/lib/auth";
 import { pingTasksForNode } from "@/lib/monitoring";
+import { getSetting } from "@/lib/db";
 import { logError } from "@/lib/log";
 
 // Nodes poll this to learn which latency probes they should run. The token
@@ -19,11 +20,19 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
   try {
-    const tasks = await pingTasksForNode(host);
-    return NextResponse.json(
-      { tasks },
-      { headers: { "Cache-Control": "no-store" } }
-    );
+    const [tasks, desiredAgentVersion] = await Promise.all([
+      pingTasksForNode(host),
+      getSetting<string>("desiredAgentVersion").catch(() => null),
+    ]);
+    // Only echo the version directive when admin has explicitly set one. An
+    // empty/missing field tells the node binary "stay on whatever you've got".
+    const body: { tasks: typeof tasks; desiredAgentVersion?: string } = { tasks };
+    if (desiredAgentVersion && desiredAgentVersion.length > 0) {
+      body.desiredAgentVersion = desiredAgentVersion;
+    }
+    return NextResponse.json(body, {
+      headers: { "Cache-Control": "no-store" },
+    });
   } catch (err) {
     logError("pingTasksForNode failed:", err);
     return NextResponse.json({ error: "storage error" }, { status: 500 });

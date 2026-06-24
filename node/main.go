@@ -46,8 +46,10 @@ func main() {
 	defer stop()
 
 	// Latency-monitoring runner: pulls assigned tcp/icmp probes from the master
-	// and reports results over http. Runs independently of metric reporting.
-	go pinger.NewRunner(cfg.Master, cfg.Token, hostInfo.Hostname, cfg.Insecure).Run(ctx)
+	// and reports results over http. Also threads the build version through
+	// so the runner can see `desiredAgentVersion` in /api/tasks responses and
+	// self-update via install.sh when the admin sets a new target.
+	go pinger.NewRunnerWithVersion(cfg.Master, cfg.Token, hostInfo.Hostname, cfg.Insecure, Version).Run(ctx)
 
 	// Prime the collector so the first reported sample carries real IO/net rates.
 	col.Collect(ctx)

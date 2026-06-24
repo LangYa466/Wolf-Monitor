@@ -11,7 +11,7 @@ import (
 
 // Version is the build version reported by -version. Override at link time with
 // -ldflags "-X main.Version=...". Kept in sync with the master's package.json.
-var Version = "1.5.6"
+var Version = "1.5.7"
 
 // Interval bounds. Floor prevents a busy-loop hammer on the master; ceiling
 // prevents a misconfigured node from going silent for hours.

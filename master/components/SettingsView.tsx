@@ -238,6 +238,8 @@ function ServersSection({
   const [publicDashboard, setPublicDashboard] = useState(false);
   const [ghProxyEnabled, setGhProxyEnabled] = useState(false);
   const [ghProxyUrl, setGhProxyUrl] = useState("");
+  const [desiredAgentVersion, setDesiredAgentVersion] = useState("");
+  const [nodeAgentVersions, setNodeAgentVersions] = useState<Record<string, string>>({});
   const [nodeTokens, setNodeTokens] = useState<Record<string, string>>({});
   const [unboundTokens, setUnboundTokens] = useState<Array<{ token: string; createdAt: number }>>([]);
   const [databaseUrl, setDatabaseUrl] = useState("");
@@ -265,6 +267,8 @@ function ServersSection({
         setPublicDashboard(d.publicDashboard === true);
         setGhProxyEnabled(d.ghProxyEnabled === true);
         setGhProxyUrl(d.ghProxyUrl ?? "");
+        setDesiredAgentVersion(d.desiredAgentVersion ?? "");
+        setNodeAgentVersions(d.nodeAgentVersions ?? {});
         setNodeTokens(d.nodeTokens ?? {});
         setUnboundTokens(d.unboundTokens ?? []);
         setDatabaseUrl(d.databaseUrl ?? "");
@@ -320,6 +324,15 @@ function ServersSection({
       setGhProxyEnabled(!v);
       setMsg(t("msgFailed"));
     }
+  }
+  async function saveDesiredAgentVersion() {
+    const v = desiredAgentVersion.trim();
+    if (v !== "" && !/^v?\d{1,3}(\.\d{1,3}){2}$/.test(v)) {
+      setMsg(t("msgFailed"));
+      return;
+    }
+    const res = await api("/api/settings", "POST", { desiredAgentVersion: v });
+    setMsg(res.ok ? t("msgSaved") : t("msgFailed"));
   }
   async function saveGhProxyUrl() {
     // Client-side gate before persisting; the API route should re-validate.
@@ -524,6 +537,37 @@ function ServersSection({
             <Input value={ipinfoToken} onChange={(e) => setIpinfoToken(e.target.value)} placeholder={t("ipinfoPh")} />
             <Button variant="outline" size="sm" onClick={saveIpinfo}>{t("save")}</Button>
           </div>
+        </Field>
+
+        <Field label={t("agentVersionLabel")}>
+          <div className="flex gap-2">
+            <Input
+              value={desiredAgentVersion}
+              onChange={(e) => setDesiredAgentVersion(e.target.value)}
+              placeholder="v1.5.7"
+            />
+            <Button variant="outline" size="sm" onClick={saveDesiredAgentVersion}>
+              {t("save")}
+            </Button>
+          </div>
+          <p className="mt-1 text-xs text-muted-foreground">{t("agentVersionHint")}</p>
+          {Object.keys(nodeAgentVersions).length > 0 && (
+            <div className="mt-2 grid grid-cols-1 gap-1 text-xs sm:grid-cols-2">
+              {Object.entries(nodeAgentVersions).map(([host, ver]) => {
+                const target = (desiredAgentVersion || "").replace(/^v/, "");
+                const cur = (ver || "").replace(/^v/, "");
+                const drift = target && cur && target !== cur;
+                return (
+                  <div key={host} className="flex justify-between gap-2 truncate">
+                    <span className="truncate text-muted-foreground">{host}</span>
+                    <span className={drift ? "text-warning" : "text-foreground tabular-nums"}>
+                      {ver || "—"}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </Field>
 
         <div>

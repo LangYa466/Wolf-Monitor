@@ -141,17 +141,30 @@ func validateTask(t Task) bool {
 // its own schedule, and reports results back in batches. It reuses the node's
 // http transport so it works against both ws and http masters.
 type Runner struct {
-	base     string // http(s) base, e.g. https://master
-	token    string
-	hostname string
-	client   *http.Client
+	base       string // http(s) base, e.g. https://master
+	token      string
+	hostname   string
+	masterArg  string // original master URL (for install.sh -e)
+	ownVersion string // build version (for "do I need to update?" check)
+	client     *http.Client
 
 	tasks  map[string]Task
 	nextAt map[string]time.Time
 	buf    []Result
+
+	// Cooldown for self-update so a wedged install.sh / target-version typo
+	// can't pin the runner in a reinstall loop. Updated by maybeSelfUpdate.
+	lastUpdateAttempt time.Time
 }
 
 func NewRunner(master, token, hostname string, insecure bool) *Runner {
+	return NewRunnerWithVersion(master, token, hostname, insecure, "")
+}
+
+// NewRunnerWithVersion is the same as NewRunner but threads the build
+// version through so refresh() can compare against the master's directive.
+// Kept as a separate entry point so existing callers don't break.
+func NewRunnerWithVersion(master, token, hostname string, insecure bool, ownVersion string) *Runner {
 	base := strings.TrimRight(master, "/")
 	base = strings.Replace(base, "wss://", "https://", 1)
 	base = strings.Replace(base, "ws://", "http://", 1)
@@ -161,12 +174,14 @@ func NewRunner(master, token, hostname string, insecure bool) *Runner {
 		tr.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
 	}
 	return &Runner{
-		base:     base,
-		token:    token,
-		hostname: hostname,
-		client:   &http.Client{Timeout: 15 * time.Second, Transport: tr},
-		tasks:    map[string]Task{},
-		nextAt:   map[string]time.Time{},
+		base:       base,
+		token:      token,
+		hostname:   hostname,
+		masterArg:  master,
+		ownVersion: ownVersion,
+		client:     &http.Client{Timeout: 15 * time.Second, Transport: tr},
+		tasks:      map[string]Task{},
+		nextAt:     map[string]time.Time{},
 	}
 }
 
@@ -240,11 +255,20 @@ func (r *Runner) refresh(ctx context.Context) {
 		return
 	}
 	var payload struct {
-		Tasks []Task `json:"tasks"`
+		Tasks                []Task `json:"tasks"`
+		DesiredAgentVersion  string `json:"desiredAgentVersion"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
 		log.Printf("[ping] refresh: decode: %v", err)
 		return
+	}
+
+	// If the master has set a target version that differs from our own,
+	// hand off to the updater (which runs install.sh + execs the new binary
+	// via systemd). updater enforces a cooldown so a stuck-bad-version
+	// directive can't pin us in a reinstall loop.
+	if payload.DesiredAgentVersion != "" {
+		r.maybeSelfUpdate(payload.DesiredAgentVersion)
 	}
 
 	if len(payload.Tasks) > maxTasksPerRefresh {

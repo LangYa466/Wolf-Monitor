@@ -28,6 +28,13 @@ interface SettingsResponse {
   publicDashboard: boolean;
   ghProxyEnabled: boolean;
   ghProxyUrl: string;
+  // Empty (default) = don't push updates. When set to e.g. "v1.5.7" the
+  // master tells every node polling /api/tasks to self-update via install.sh
+  // if its reported agentVersion doesn't match.
+  desiredAgentVersion: string;
+  // hostname → currently-reported agentVersion (read from nodes.host->>'agentVersion')
+  // so the admin UI can show drift.
+  nodeAgentVersions: Record<string, string>;
   // Fingerprints only — the raw key/tweak are secrets equivalent to a
   // password hash (anyone with them can enumerate every node id), so we
   // never echo them back over the wire. Operators verify rotation by
@@ -63,13 +70,19 @@ async function buildResponse(): Promise<SettingsResponse> {
   const publicDashboard = (await getSetting<boolean>(PUBLIC_DASHBOARD_KEY)) === true;
   const ghProxyEnabled = (await getSetting<boolean>("ghProxyEnabled")) === true;
   const ghProxyUrl = (await getSetting<string>("ghProxyUrl")) ?? "";
+  const desiredAgentVersion = (await getSetting<string>("desiredAgentVersion")) ?? "";
   const idCipher = await getOpaqueIdConfig();
 
   // Ensure every known node has its own token (lazy migration on read).
-  const { rows } = await getPool().query<{ id: string }>(`SELECT id FROM nodes`);
+  // Also pull the host->>'agentVersion' so the UI shows version drift.
+  const { rows } = await getPool().query<{ id: string; agent_version: string | null }>(
+    `SELECT id, host->>'agentVersion' AS agent_version FROM nodes`,
+  );
   const nodeTokens: Record<string, string> = {};
+  const nodeAgentVersions: Record<string, string> = {};
   for (const r of rows) {
     nodeTokens[r.id] = await ensureTokenForNode(r.id);
+    nodeAgentVersions[r.id] = r.agent_version ?? "";
   }
   const all = await listNodeTokens();
   const unboundTokens = all
@@ -82,6 +95,8 @@ async function buildResponse(): Promise<SettingsResponse> {
     publicDashboard,
     ghProxyEnabled,
     ghProxyUrl,
+    desiredAgentVersion,
+    nodeAgentVersions,
     idCipherKeyFingerprint: idCipher.keyFingerprint,
     idCipherTweakFingerprint: idCipher.tweakFingerprint,
     nodeTokens,
@@ -137,6 +152,20 @@ export async function POST(req: NextRequest) {
     }
     if (typeof body.ghProxyUrl === "string") {
       await setSetting("ghProxyUrl", body.ghProxyUrl.trim());
+    }
+    // Target node binary version. Whitelist semver-ish strings only —
+    // anything else and the install.sh -V argument becomes a shell injection.
+    // Empty string clears the directive (nodes stop self-updating).
+    if (typeof body.desiredAgentVersion === "string") {
+      const v = body.desiredAgentVersion.trim();
+      if (v === "" || /^v?\d{1,3}(\.\d{1,3}){2}$/.test(v)) {
+        await setSetting("desiredAgentVersion", v);
+      } else {
+        return NextResponse.json(
+          { error: "desiredAgentVersion must look like v1.2.3" },
+          { status: 400 },
+        );
+      }
     }
     // Cipher key/tweak are equivalent to a password hash: anyone with them
     // can derive every node's opaque id. Require a fresh-auth confirmation
