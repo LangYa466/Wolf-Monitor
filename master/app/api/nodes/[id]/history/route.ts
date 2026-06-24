@@ -25,6 +25,13 @@ export async function GET(
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
   if (!user) {
+    // Guests must address nodes by their opaque (encrypted) id. Accepting the
+    // raw hostname here would turn this endpoint into a hostname-existence
+    // oracle: guess a hostname, get history back ⇒ it exists. Admins still
+    // pass the hostname directly from the dashboard.
+    if (!/^\d{1,10}$/.test(id)) {
+      return NextResponse.json({ error: "not found" }, { status: 404 });
+    }
     const ip = clientIp(req.headers) ?? "unknown";
     if (!takeToken(`ip-guest:${ip}`, GUEST_RL_CAPACITY, GUEST_RL_REFILL_PER_SEC)) {
       const retry = retryAfterSec(GUEST_RL_REFILL_PER_SEC);
