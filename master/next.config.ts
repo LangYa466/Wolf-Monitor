@@ -8,13 +8,17 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 // origins used in app/layout.tsx (font-logos + Google Fonts). 'unsafe-inline'
 // for script/style is required by Next's hydration + Tailwind inline styles;
 // tighten via nonces later if/when feasible.
+// Cloudflare auto-injects Browser Insights (beacon.min.js) when the site is
+// proxied behind CF. Allow its script + beacon-submit origin so CSP doesn't
+// block it, which also avoids the hydration mismatch CF causes when the
+// blocked-script <script> stub stays in the served HTML.
 const csp = [
   "default-src 'self'",
-  "script-src 'self' 'unsafe-inline'",
+  "script-src 'self' 'unsafe-inline' https://static.cloudflareinsights.com",
   "style-src 'self' 'unsafe-inline' https://fastly.jsdelivr.net https://fonts.googleapis.com",
   "font-src 'self' data: https://fonts.gstatic.com https://fastly.jsdelivr.net",
   "img-src 'self' data: https://flagcdn.com",
-  "connect-src 'self'",
+  "connect-src 'self' https://cloudflareinsights.com",
   "frame-ancestors 'none'",
   "base-uri 'none'",
   "form-action 'self'",
