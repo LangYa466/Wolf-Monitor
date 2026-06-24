@@ -423,20 +423,18 @@ export async function isPublicDashboard(): Promise<boolean> {
   return (await getSetting<boolean>(PUBLIC_DASHBOARD_KEY)) === true;
 }
 
-// Strip ONLY the fields the operator wants hidden from guests: the public IP,
-// the latency probe topology (admin-only routes already enforce that), and
-// the internal hostname id (replaced by the opaque url id). Everything else
-// — host facts (CPU model, memory total, uptime, boot time) and live metrics
-// (load, totals, speeds) — passes through unchanged so the public dashboard
-// looks the same as the admin view minus IP + latency.
+// Public dashboard exposure: hide IP, latency (admin-only on the route side),
+// and the host's machine name (some operators run probes with hostnames that
+// leak project/customer identifiers). All other host facts (CPU model,
+// memory/disk totals, uptime, boot time) and live metrics pass through.
 export function publicNodes(nodes: NodeView[]): NodeView[] {
   return nodes.map(
     (n) =>
       ({
-        id: n.opaqueId, // hide internal hostname id from guests (URL identity)
+        id: n.opaqueId, // url identity stays opaque
         opaqueId: n.opaqueId,
-        name: n.name,
-        host: n.host,
+        name: n.name, // admin-set display name (intentional)
+        host: { ...n.host, hostname: "" },
         metrics: n.metrics,
         lastSeen: n.lastSeen,
         online: n.online,
