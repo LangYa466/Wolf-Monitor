@@ -486,6 +486,10 @@ function sanitizeHost(h: HostInfo): HostInfo {
     swapTotal: n(h?.swapTotal),
     diskTotal: n(h?.diskTotal),
     bootTime: n(h?.bootTime),
+    // Persisted so the Settings page can show per-node version drift; old
+    // binaries that don't report it land here as empty string and the UI
+    // renders "—".
+    agentVersion: s(h?.agentVersion, 64),
   };
 }
 

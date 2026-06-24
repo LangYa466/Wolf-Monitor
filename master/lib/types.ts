@@ -13,6 +13,10 @@ export interface HostInfo {
   swapTotal: number;
   diskTotal: number;
   bootTime: number;
+  // Optional — older node binaries (≤1.5.8) don't set this. Newer ones report
+  // their build version so the admin UI can show fleet-wide drift and the
+  // desiredAgentVersion directive can pick the right targets.
+  agentVersion?: string;
 }
 
 export interface Metrics {
