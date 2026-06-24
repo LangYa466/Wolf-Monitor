@@ -21,7 +21,10 @@ func main() {
 	log.SetFlags(log.LstdFlags | log.Lmsgprefix)
 	log.SetPrefix("[node] ")
 
-	log.Printf("starting: master=%s transport=%s interval=%ds", cfg.Master, cfg.Transport, cfg.Interval)
+	log.Printf("starting: master=%s transport=%s interval=%ds insecure=%t", cfg.Master, cfg.Transport, cfg.Interval, cfg.Insecure)
+	if cfg.Insecure {
+		log.Printf("WARNING: TLS verification DISABLED for %s — token + metrics are exposed to any on-path attacker", cfg.Master)
+	}
 
 	var rep reporter.Reporter
 	switch cfg.Transport {

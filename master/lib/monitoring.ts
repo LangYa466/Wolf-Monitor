@@ -1,6 +1,7 @@
-import { ensureSchema, getPool, OFFLINE_AFTER_MS, pruneHistory } from "./db";
+import { ensureSchema, getPool, OFFLINE_AFTER_MS, pruneHistory, writeAudit } from "./db";
 import { pruneAuthAttempts } from "./auth";
 import { notify } from "./notify";
+import { isPrivate } from "./net";
 import type {
   AlertMetric,
   AlertRule,
@@ -16,6 +17,48 @@ const METRIC_COLUMN: Record<AlertMetric, string> = {
   ram: "mem_pct",
   disk: "disk_pct",
 };
+
+const VALID_METRICS: readonly AlertMetric[] = ["cpu", "ram", "disk"];
+
+// Reject targets that resolve to private / loopback / link-local space so a
+// compromised admin can't weaponise the node fleet as an internal port scanner.
+// Self-hosted deployments that legitimately probe LAN services can opt out via
+// WOLF_ALLOW_INTERNAL_PROBE_TARGETS=1.
+function validatePingTarget(raw: string, type: PingType): string {
+  const t = (raw ?? "").trim();
+  if (!t) throw new Error("target required");
+  if (t.length > 253) throw new Error("target too long");
+  let host = t;
+  if (type === "tcp") {
+    // Accept host:port, [v6]:port, or bare host (probe defaults to :80 node-side).
+    const v6 = t.match(/^\[([^\]]+)\](?::(\d+))?$/);
+    if (v6) {
+      host = v6[1];
+      if (v6[2] && (Number(v6[2]) < 1 || Number(v6[2]) > 65535))
+        throw new Error("invalid port");
+    } else {
+      const idx = t.lastIndexOf(":");
+      if (idx > 0 && /^\d+$/.test(t.slice(idx + 1))) {
+        const port = Number(t.slice(idx + 1));
+        if (port < 1 || port > 65535) throw new Error("invalid port");
+        host = t.slice(0, idx);
+      }
+    }
+  }
+  if (!/^[a-zA-Z0-9._:\-]+$/.test(host)) throw new Error("invalid host");
+  if (process.env.WOLF_ALLOW_INTERNAL_PROBE_TARGETS === "1") return t;
+  const lower = host.toLowerCase();
+  if (
+    lower === "localhost" ||
+    lower === "0.0.0.0" ||
+    lower === "::" ||
+    lower === "::0" ||
+    isPrivate(host)
+  ) {
+    throw new Error("internal/private targets are not allowed");
+  }
+  return t;
+}
 
 // Re-notify an already-firing alert / still-offline node at most this often,
 // so a sustained problem reminds without spamming every cron tick.
@@ -54,10 +97,13 @@ export async function upsertAlertRule(
 ): Promise<AlertRule> {
   await ensureSchema();
   const id = rule.id || rid("alert");
+  const metric: AlertMetric = VALID_METRICS.includes(rule.metric as AlertMetric)
+    ? (rule.metric as AlertMetric)
+    : "cpu";
   const row: AlertRule = {
     id,
     name: rule.name?.trim() || "rule",
-    metric: (rule.metric as AlertMetric) || "cpu",
+    metric,
     threshold: clamp(rule.threshold ?? 80, 0, 100),
     ratio: clamp(rule.ratio ?? 0.8, 0, 1),
     windowMinutes: Math.max(1, Math.round(rule.windowMinutes ?? 15)),
@@ -84,6 +130,10 @@ export async function upsertAlertRule(
       row.enabled,
     ]
   );
+  await writeAudit("alert_rule.upsert", {
+    target: row.id,
+    details: { name: row.name, metric: row.metric, threshold: row.threshold },
+  }).catch(() => {});
   return row;
 }
 
@@ -91,6 +141,7 @@ export async function deleteAlertRule(id: string): Promise<void> {
   await ensureSchema();
   await getPool().query(`DELETE FROM alert_rules WHERE id=$1`, [id]);
   await getPool().query(`DELETE FROM alert_state WHERE rule_id=$1`, [id]);
+  await writeAudit("alert_rule.delete", { target: id }).catch(() => {});
 }
 
 // ── Offline settings CRUD ───────────────────────────────────────────────────
@@ -123,6 +174,10 @@ export async function upsertOfflineSetting(
        enabled=EXCLUDED.enabled, grace_seconds=EXCLUDED.grace_seconds`,
     [nodeId, enabled, Math.max(0, Math.round(graceSeconds))]
   );
+  await writeAudit("offline.upsert", {
+    target: nodeId,
+    details: { enabled, graceSeconds },
+  }).catch(() => {});
 }
 
 // ── Ping tasks CRUD ─────────────────────────────────────────────────────────
@@ -173,11 +228,13 @@ export async function upsertPingTask(
 ): Promise<PingTask> {
   await ensureSchema();
   const id = task.id || rid("ping");
+  const type: PingType = (task.type as PingType) === "icmp" ? "icmp" : "tcp";
+  const target = validatePingTarget(task.target ?? "", type);
   const row: PingTask = {
     id,
     name: task.name?.trim() || "monitor",
-    target: task.target?.trim() || "",
-    type: (task.type as PingType) === "icmp" ? "icmp" : "tcp",
+    target,
+    type,
     intervalSeconds: Math.max(5, Math.round(task.intervalSeconds ?? 60)),
     nodeIds: task.nodeIds ?? [],
     exclude: task.exclude ?? false,
@@ -201,6 +258,10 @@ export async function upsertPingTask(
       row.enabled,
     ]
   );
+  await writeAudit("ping_task.upsert", {
+    target: row.id,
+    details: { name: row.name, target: row.target },
+  }).catch(() => {});
   return row;
 }
 
@@ -208,24 +269,47 @@ export async function deletePingTask(id: string): Promise<void> {
   await ensureSchema();
   await getPool().query(`DELETE FROM ping_tasks WHERE id=$1`, [id]);
   await getPool().query(`DELETE FROM ping_results WHERE task_id=$1`, [id]);
+  await writeAudit("ping_task.delete", { target: id }).catch(() => {});
 }
+
+// Cap rows per batch well under pg's 65535-parameter wire limit and keep
+// memory bounded. Callers should pre-filter further; we re-cap defensively
+// here so a single misbehaving node can't blow up the DB or this process.
+const PING_BATCH_MAX = 500;
+const PING_ID_MAX = 128;
 
 export async function savePingResults(results: PingResult[]): Promise<void> {
   if (results.length === 0) return;
   await ensureSchema();
-  const pool = getPool();
-  const values: string[] = [];
-  const params: unknown[] = [];
-  results.forEach((r, i) => {
-    const b = i * 5;
-    values.push(`($${b + 1},$${b + 2},$${b + 3},$${b + 4},$${b + 5})`);
-    params.push(r.taskId, r.nodeId, r.ts, r.latencyMs, r.success);
-  });
-  await pool.query(
-    `INSERT INTO ping_results (task_id, node_id, ts, latency_ms, success)
-     VALUES ${values.join(",")}`,
-    params
+  const now = Date.now();
+  const DAY = 24 * 60 * 60 * 1000;
+  const clean = results.filter(
+    (r) =>
+      r &&
+      typeof r.taskId === "string" &&
+      r.taskId.length > 0 && r.taskId.length <= PING_ID_MAX &&
+      typeof r.nodeId === "string" &&
+      r.nodeId.length > 0 && r.nodeId.length <= PING_ID_MAX &&
+      typeof r.latencyMs === "number" && Number.isFinite(r.latencyMs) &&
+      typeof r.ts === "number" && r.ts > now - DAY && r.ts < now + 5 * 60 * 1000,
   );
+  if (clean.length === 0) return;
+  const pool = getPool();
+  for (let off = 0; off < clean.length; off += PING_BATCH_MAX) {
+    const slice = clean.slice(off, off + PING_BATCH_MAX);
+    const values: string[] = [];
+    const params: unknown[] = [];
+    slice.forEach((r, i) => {
+      const b = i * 5;
+      values.push(`($${b + 1},$${b + 2},$${b + 3},$${b + 4},$${b + 5})`);
+      params.push(r.taskId, r.nodeId, r.ts, r.latencyMs, r.success);
+    });
+    await pool.query(
+      `INSERT INTO ping_results (task_id, node_id, ts, latency_ms, success)
+       VALUES ${values.join(",")}`,
+      params,
+    );
+  }
 }
 
 // Latency history for ONE node, grouped by task. Each task gets the newest
@@ -348,6 +432,23 @@ async function claimSlot(key: string, intervalMs: number): Promise<boolean> {
   return rows.length > 0;
 }
 
+// Process-local short-circuit so a fleet of frequent reports doesn't hammer
+// pg with INSERT...ON CONFLICT on every tick. The DB claimSlot remains the
+// cross-instance authority; this just collapses redundant attempts within a
+// single instance. globalThis survives HMR / warm serverless invocations.
+type SlotCache = { [key: string]: number };
+const __slotCache: SlotCache = ((globalThis as unknown as { __wolfSlotCache?: SlotCache })
+  .__wolfSlotCache ??= {});
+
+async function tryClaimSlot(key: string, intervalMs: number): Promise<boolean> {
+  const now = Date.now();
+  const last = __slotCache[key] ?? 0;
+  if (now - last < intervalMs * 0.9) return false;
+  const won = await claimSlot(key, intervalMs);
+  __slotCache[key] = won ? now : now - intervalMs * 0.5;
+  return won;
+}
+
 // maybeEvaluate is the self-contained scheduler: node reports call it, and it
 // runs evaluate() at most once per EVAL_MIN_INTERVAL_MS (plus hourly retention
 // cleanup), claiming each slot atomically so concurrent reports don't double-run.
@@ -355,11 +456,11 @@ async function claimSlot(key: string, intervalMs: number): Promise<boolean> {
 // evaluation keeps ticking. Returns true if this call performed the evaluation.
 export async function maybeEvaluate(): Promise<boolean> {
   await ensureSchema();
-  if (await claimSlot("lastPruneAt", PRUNE_MIN_INTERVAL_MS)) {
+  if (await tryClaimSlot("lastPruneAt", PRUNE_MIN_INTERVAL_MS)) {
     await pruneHistory();
     await pruneAuthAttempts();
   }
-  if (!(await claimSlot("lastEvalAt", EVAL_MIN_INTERVAL_MS))) return false;
+  if (!(await tryClaimSlot("lastEvalAt", EVAL_MIN_INTERVAL_MS))) return false;
   await evaluate();
   return true;
 }
@@ -402,7 +503,13 @@ async function evaluateLoadAlerts(
 
   for (const rule of rules) {
     if (!rule.enabled) continue;
+    // SQL-boundary guard: never interpolate an unknown column even if validation
+    // upstream regresses (defense in depth against latent CWE-89).
     const col = METRIC_COLUMN[rule.metric];
+    if (!col) {
+      console.warn(`alert rule ${rule.id} has invalid metric ${rule.metric}; skipping`);
+      continue;
+    }
     // Allowlist (exclude=false): match nodes in `targets`, or all if empty.
     // Blacklist (exclude=true): match every node EXCEPT those in `targets`.
     const targetSet = new Set(rule.targets);
@@ -411,49 +518,90 @@ async function evaluateLoadAlerts(
       : rule.targets.length > 0
         ? nodes.filter((n) => targetSet.has(n.id))
         : nodes;
+    if (targets.length === 0) continue;
     const since = now - rule.windowMinutes * 60 * 1000;
+    const ids = targets.map((t) => t.id);
 
-    for (const node of targets) {
-      // Fraction of window samples at/above threshold.
-      const { rows } = await pool.query<{ total: string; over: string }>(
-        `SELECT COUNT(*) AS total,
-                COUNT(*) FILTER (WHERE ${col} >= $3) AS over
+    try {
+      // One aggregate round-trip per rule (was per rule × node).
+      const { rows: aggRows } = await pool.query<{
+        node_id: string;
+        total: string;
+        over: string;
+      }>(
+        `SELECT node_id,
+                COUNT(*)                              AS total,
+                COUNT(*) FILTER (WHERE ${col} >= $3)  AS over
            FROM metrics_history
-          WHERE node_id = $1 AND ts >= $2`,
-        [node.id, since, rule.threshold]
+          WHERE node_id = ANY($1::text[]) AND ts >= $2
+          GROUP BY node_id`,
+        [ids, since, rule.threshold],
       );
-      const total = Number(rows[0].total);
-      const over = Number(rows[0].over);
-      // Need a minimum of samples to make a call; skip if no data.
-      const fraction = total > 0 ? over / total : 0;
-      const shouldFire = total >= 2 && fraction >= rule.ratio;
+      const aggByNode = new Map(aggRows.map((r) => [r.node_id, r]));
 
-      const state = await getAlertState(rule.id, node.id);
-      if (shouldFire) {
-        const due =
-          !state.firing ||
-          !state.lastNotified ||
-          now - state.lastNotified >= RENOTIFY_MS;
-        if (due) {
-          await notify(
-            "alert",
-            rule.name,
-            node.id,
-            `${rule.metric.toUpperCase()} ≥ ${rule.threshold}% for ${(fraction * 100).toFixed(0)}% of the last ${rule.windowMinutes}m (threshold ${(rule.ratio * 100).toFixed(0)}%).`
-          );
-          summary.alertsFired++;
+      // One round-trip for all states this rule cares about.
+      const { rows: stateRows } = await pool.query<{
+        node_id: string;
+        firing: boolean;
+        last_notified: string | null;
+      }>(
+        `SELECT node_id, firing, last_notified
+           FROM alert_state
+          WHERE rule_id = $1 AND node_id = ANY($2::text[])`,
+        [rule.id, ids],
+      );
+      const stateByNode = new Map(stateRows.map((s) => [s.node_id, s]));
+
+      const upserts: { nodeId: string; firing: boolean; lastNotified: number | null }[] = [];
+      for (const node of targets) {
+        const agg = aggByNode.get(node.id);
+        const total = agg ? Number(agg.total) : 0;
+        const over = agg ? Number(agg.over) : 0;
+        const fraction = total > 0 ? over / total : 0;
+        const shouldFire = total >= 2 && fraction >= rule.ratio;
+        const prev = stateByNode.get(node.id);
+        const wasFiring = prev?.firing ?? false;
+        const lastNotified = prev?.last_notified ? Number(prev.last_notified) : null;
+
+        if (shouldFire) {
+          const due = !wasFiring || !lastNotified || now - lastNotified >= RENOTIFY_MS;
+          if (due) {
+            await notify(
+              "alert",
+              rule.name,
+              node.id,
+              `${rule.metric.toUpperCase()} ≥ ${rule.threshold}% for ${(fraction * 100).toFixed(0)}% of the last ${rule.windowMinutes}m (threshold ${(rule.ratio * 100).toFixed(0)}%).`,
+            );
+            summary.alertsFired++;
+          }
+          upserts.push({ nodeId: node.id, firing: true, lastNotified: due ? now : lastNotified });
+        } else if (wasFiring) {
+          await notify("recovery", rule.name, node.id, `${rule.metric.toUpperCase()} back to normal.`);
+          summary.recoveries++;
+          upserts.push({ nodeId: node.id, firing: false, lastNotified: now });
         }
-        await setAlertState(rule.id, node.id, true, due ? now : state.lastNotified);
-      } else if (state.firing) {
-        await notify(
-          "recovery",
-          rule.name,
-          node.id,
-          `${rule.metric.toUpperCase()} back to normal.`
-        );
-        summary.recoveries++;
-        await setAlertState(rule.id, node.id, false, now);
       }
+
+      // Batched state persistence: one round-trip for this rule's edges.
+      if (upserts.length > 0) {
+        const values: string[] = [];
+        const params: (string | number | boolean | null)[] = [rule.id];
+        upserts.forEach((u, i) => {
+          const base = i * 3 + 2;
+          values.push(`($1,$${base},$${base + 1},$${base + 2})`);
+          params.push(u.nodeId, u.firing, u.lastNotified);
+        });
+        await pool.query(
+          `INSERT INTO alert_state (rule_id, node_id, firing, last_notified)
+           VALUES ${values.join(",")}
+           ON CONFLICT (rule_id, node_id) DO UPDATE SET
+             firing=EXCLUDED.firing, last_notified=EXCLUDED.last_notified`,
+          params,
+        );
+      }
+    } catch (e) {
+      // One bad rule shouldn't blind the rest of the tick.
+      console.error(`rule ${rule.id} eval failed`, e);
     }
   }
 }
@@ -486,36 +634,6 @@ async function evaluateOffline(
       await setOfflineState(node.id, false, now);
     }
   }
-}
-
-async function getAlertState(ruleId: string, nodeId: string) {
-  const { rows } = await getPool().query<{
-    firing: boolean;
-    last_notified: string | null;
-  }>(`SELECT firing, last_notified FROM alert_state WHERE rule_id=$1 AND node_id=$2`, [
-    ruleId,
-    nodeId,
-  ]);
-  if (rows.length === 0) return { firing: false, lastNotified: null as number | null };
-  return {
-    firing: rows[0].firing,
-    lastNotified: rows[0].last_notified ? Number(rows[0].last_notified) : null,
-  };
-}
-
-async function setAlertState(
-  ruleId: string,
-  nodeId: string,
-  firing: boolean,
-  lastNotified: number | null
-) {
-  await getPool().query(
-    `INSERT INTO alert_state (rule_id, node_id, firing, last_notified)
-     VALUES ($1,$2,$3,$4)
-     ON CONFLICT (rule_id, node_id) DO UPDATE SET
-       firing=EXCLUDED.firing, last_notified=EXCLUDED.last_notified`,
-    [ruleId, nodeId, firing, lastNotified]
-  );
 }
 
 async function setOfflineState(nodeId: string, offline: boolean, ts: number) {

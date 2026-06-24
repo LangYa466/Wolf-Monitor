@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { currentUser } from "@/lib/session";
 import { listOfflineSettings, upsertOfflineSetting } from "@/lib/monitoring";
+import { logError } from "@/lib/log";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -11,7 +12,7 @@ export async function GET() {
   try {
     return NextResponse.json({ settings: await listOfflineSettings() });
   } catch (err) {
-    console.error(err);
+    logError("listOfflineSettings failed:", err);
     return NextResponse.json({ error: "storage error" }, { status: 500 });
   }
 }
@@ -25,7 +26,7 @@ export async function POST(req: NextRequest) {
     await upsertOfflineSetting(nodeId, Boolean(enabled), Number(graceSeconds ?? 180));
     return NextResponse.json({ ok: true });
   } catch (err) {
-    console.error(err);
+    logError("upsertOfflineSetting failed:", err);
     return NextResponse.json({ error: "bad request" }, { status: 400 });
   }
 }

@@ -3,9 +3,21 @@ package main
 import (
 	"encoding/json"
 	"flag"
+	"fmt"
 	"os"
 	"strconv"
 	"strings"
+)
+
+// Version is the build version reported by -version. Override at link time with
+// -ldflags "-X main.Version=...". Kept in sync with the master's package.json.
+var Version = "1.5.6"
+
+// Interval bounds. Floor prevents a busy-loop hammer on the master; ceiling
+// prevents a misconfigured node from going silent for hours.
+const (
+	minInterval = 1
+	maxInterval = 3600
 )
 
 // Config controls how the node connects to the master and how often it samples.
@@ -22,7 +34,16 @@ type Config struct {
 	// Interval is the sampling/report interval in seconds.
 	Interval int `json:"interval"`
 	// Insecure skips TLS verification (self-signed master certs).
+	// Prefer MasterCA / MasterCAPEM over this — Insecure exposes the bearer
+	// token to any on-path MITM.
 	Insecure bool `json:"insecure"`
+	// MasterCA is a path to a PEM file containing the master's CA / self-signed
+	// cert. When set, TLS verification uses this pool instead of system roots
+	// and Insecure is ignored.
+	MasterCA string `json:"master_ca"`
+	// MasterCAPEM is an inline PEM blob (useful for systemd EnvironmentFile or
+	// the install one-liner). Takes precedence over MasterCA when both set.
+	MasterCAPEM string `json:"master_ca_pem"`
 }
 
 func defaultConfig() Config {
@@ -65,6 +86,12 @@ func LoadConfig() Config {
 	if v := os.Getenv("WOLF_INSECURE"); v != "" {
 		cfg.Insecure = v == "1" || strings.EqualFold(v, "true")
 	}
+	if v := os.Getenv("WOLF_MASTER_CA"); v != "" {
+		cfg.MasterCA = v
+	}
+	if v := os.Getenv("WOLF_MASTER_CA_PEM"); v != "" {
+		cfg.MasterCAPEM = v
+	}
 
 	// 3) flags (highest priority). `-e`/`-t` are Komari-compatible aliases for
 	// `-master`/`-token` so the same one-click install command shape works.
@@ -76,17 +103,28 @@ func LoadConfig() Config {
 	flag.StringVar(&token, "t", cfg.Token, "alias for -token")
 	transport := flag.String("transport", cfg.Transport, "transport: ws or http")
 	interval := flag.Int("interval", cfg.Interval, "report interval in seconds")
-	insecure := flag.Bool("insecure", cfg.Insecure, "skip TLS verification")
+	insecure := flag.Bool("insecure", cfg.Insecure, "skip TLS verification (NOT RECOMMENDED — use -master-ca to pin a private CA)")
+	masterCA := flag.String("master-ca", cfg.MasterCA, "path to PEM with master CA / self-signed cert (preferred over -insecure)")
+	showVersion := flag.Bool("version", false, "print build version and exit")
 	flag.Parse()
+
+	if *showVersion {
+		fmt.Println(Version)
+		os.Exit(0)
+	}
 
 	cfg.Master = master
 	cfg.Token = token
 	cfg.Transport = *transport
 	cfg.Interval = *interval
 	cfg.Insecure = *insecure
+	cfg.MasterCA = *masterCA
 
-	if cfg.Interval < 1 {
-		cfg.Interval = 1
+	if cfg.Interval < minInterval {
+		cfg.Interval = minInterval
+	}
+	if cfg.Interval > maxInterval {
+		cfg.Interval = maxInterval
 	}
 	cfg.Transport = strings.ToLower(strings.TrimSpace(cfg.Transport))
 	return cfg

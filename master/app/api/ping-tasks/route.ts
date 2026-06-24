@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { currentUser } from "@/lib/session";
 import { listPingTasks, upsertPingTask } from "@/lib/monitoring";
+import { logError } from "@/lib/log";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -11,7 +12,7 @@ export async function GET() {
   try {
     return NextResponse.json({ tasks: await listPingTasks() });
   } catch (err) {
-    console.error(err);
+    logError("listPingTasks failed:", err);
     return NextResponse.json({ error: "storage error" }, { status: 500 });
   }
 }
@@ -23,7 +24,7 @@ export async function POST(req: NextRequest) {
     const task = await upsertPingTask(await req.json());
     return NextResponse.json({ task });
   } catch (err) {
-    console.error(err);
+    logError("upsertPingTask failed:", err);
     return NextResponse.json({ error: "bad request" }, { status: 400 });
   }
 }

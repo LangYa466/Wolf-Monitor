@@ -70,6 +70,30 @@ Configured from the dashboard **Settings** page, evaluated on a schedule
   interval (allowlist or blacklist of servers); results shown on the `/latency`
   page and each server's detail Network tab.
 
+## Security & operations
+
+Self-hosted, so rotation and backup are on the operator. Quick reference:
+
+- **Rotate a node token** — Settings → Servers → Rotate token, then restart
+  that node with the new `-t` value.
+- **Rotate `CRON_SECRET`** — update the env var on the host and redeploy;
+  in-flight `/api/cron/*` calls with the old secret will 401.
+- **Rotate `DATABASE_URL` credentials** — rotate at the postgres provider,
+  update the env var, redeploy; nodes reconnect automatically.
+- **Rotate Telegram / webhook tokens** — Settings → Notifications, paste new
+  values; old ones stop sending immediately.
+- **Invalidate all admin sessions** — `psql "$DATABASE_URL" -c "DELETE FROM
+  sessions;"` then have operators log in again.
+- **Backup postgres** — `pg_dump -Fc "$DATABASE_URL" > wolf-$(date +%F).dump`;
+  restore with `pg_restore -d "$DATABASE_URL" --clean --if-exists <file>`.
+  History is pruned to 30d, so backup cadence should match your RPO.
+- **Binary integrity** — verify `sha256sum` of the downloaded `wolf-node`
+  against the value on the GitHub Releases page before installing.
+
+Report vulnerabilities via
+[GitHub Security Advisories](https://github.com/LangYa466/Wolf-Monitor/security/advisories/new).
+Best-effort triage; this is a solo-maintained MIT project.
+
 ## Star History
 
 <a href="https://star-history.com/#LangYa466/Wolf-Monitor&Date">

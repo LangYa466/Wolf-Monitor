@@ -5,10 +5,11 @@
 @layer base {
   :root {
     /* 全局字体：本机优先用更纱黑体（中英文名都列上以兼容不同系统的注册名），
-       未安装时回退到 Google Fonts 加载的 Noto Sans SC（思源黑体，字形最接近）与 Geist。 */
+       未安装时回退到 next/font 自托管的 Noto Sans SC / Geist / JetBrains Mono
+       （CSS 变量在 app/layout.tsx 的 <html> 上注入，不再走第三方 CDN）。 */
     --font-sans: "Sarasa Gothic SC", "更纱黑体 SC", "Sarasa Gothic", "更纱黑体",
-      "Noto Sans SC", "Geist", ui-sans-serif, system-ui, sans-serif;
-    --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco,
+      var(--font-noto-sc), var(--font-geist), ui-sans-serif, system-ui, sans-serif;
+    --font-mono: var(--font-jetbrains-mono), ui-monospace, SFMono-Regular, Menlo, Monaco,
       Consolas, "Liberation Mono", "Courier New", monospace;
 
     /* Pterodactyl-style dark tokens (HSL triples, referenced as hsl(var(--x))). */

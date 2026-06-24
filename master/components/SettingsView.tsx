@@ -46,6 +46,19 @@ import { GripVertical, Trash2, RotateCw, Check, Minus, AlertTriangle, Terminal, 
 // When `proxy` is set, prepends it to the install-script URL too (so the
 // script itself downloads through the mirror, not just the wolf-node binary
 // that the script later fetches via `-p`).
+//
+// Pinned to a release tag (not `main`) so a malicious push to main can't
+// rewrite the install script every existing operator pastes onto new boxes.
+// Bump on release. CWE-494.
+const INSTALL_REF = "v1.5.5";
+// Strict https://host[:port] proxy regex. Anything else (http://, paths,
+// query strings, embedded creds, IDN tricks) is rejected before we splice
+// it into a `wget | sudo bash` snippet.
+const SAFE_PROXY_RE = /^https:\/\/[a-z0-9.-]+(?::\d+)?$/i;
+function safeProxy(raw: string | undefined): string {
+  const v = (raw ?? "").trim().replace(/\/+$/, "");
+  return SAFE_PROXY_RE.test(v) ? v : "";
+}
 function InstallSnippet({
   base,
   tok,
@@ -58,9 +71,9 @@ function InstallSnippet({
   proxy?: string;
 }) {
   const { t } = useI18n();
-  const p = (proxy ?? "").trim().replace(/\/+$/, "");
-  const shUrl = `https://raw.githubusercontent.com/LangYa466/Wolf-Monitor/main/node/install.sh`;
-  const ps1Url = `https://raw.githubusercontent.com/LangYa466/Wolf-Monitor/main/node/install.ps1`;
+  const p = safeProxy(proxy);
+  const shUrl = `https://raw.githubusercontent.com/LangYa466/Wolf-Monitor/${INSTALL_REF}/node/install.sh`;
+  const ps1Url = `https://raw.githubusercontent.com/LangYa466/Wolf-Monitor/${INSTALL_REF}/node/install.ps1`;
   const shFull = p ? `${p}/${shUrl}` : shUrl;
   const ps1Full = p ? `${p}/${ps1Url}` : ps1Url;
   const shProxyArg = p ? ` -p ${p}` : "";
@@ -231,8 +244,11 @@ function ServersSection({
   const [order, setOrder] = useState<NodeView[]>(nodes);
   const [dragId, setDragId] = useState<string | null>(null);
   const [names, setNames] = useState<Record<string, string>>({});
-  const [cipherKey, setCipherKey] = useState("");
-  const [cipherTweak, setCipherTweak] = useState("");
+  // Fingerprints (sha256 prefix) of the active key/tweak — the raw secrets
+  // are never sent over the wire. Operators verify a rotate took effect by
+  // watching these digests change.
+  const [cipherKeyFp, setCipherKeyFp] = useState("");
+  const [cipherTweakFp, setCipherTweakFp] = useState("");
   const [openInstall, setOpenInstall] = useState<string | null>(null);
   const [showNewServer, setShowNewServer] = useState(false);
   const [msg, setMsg] = useState("");
@@ -252,8 +268,8 @@ function ServersSection({
         setNodeTokens(d.nodeTokens ?? {});
         setUnboundTokens(d.unboundTokens ?? []);
         setDatabaseUrl(d.databaseUrl ?? "");
-        setCipherKey(d.idCipherKey ?? "");
-        setCipherTweak(d.idCipherTweak ?? "");
+        setCipherKeyFp(d.idCipherKeyFingerprint ?? "");
+        setCipherTweakFp(d.idCipherTweakFingerprint ?? "");
       })
       .catch(() => {});
   }, []);
@@ -265,12 +281,17 @@ function ServersSection({
     setMsg(res.ok ? t("msgSaved") : t("msgFailed"));
   }
 
-  async function saveCipher(payload: { idCipherKey?: string; idCipherTweak?: string } | { rotateIdCipher: true }) {
-    const res = await api("/api/settings", "POST", payload);
+  async function rotateCipher() {
+    // Re-prompt for the admin password — rotating the cipher key invalidates
+    // every existing server link, so we treat it like a sensitive op and
+    // refuse to act on a stolen session cookie alone.
+    const password = window.prompt(t("opaqueRotatePrompt"));
+    if (!password) return;
+    const res = await api("/api/settings", "POST", { rotateIdCipher: true, password });
     if (res.ok) {
       const d = await res.json();
-      setCipherKey(d.idCipherKey ?? "");
-      setCipherTweak(d.idCipherTweak ?? "");
+      setCipherKeyFp(d.idCipherKeyFingerprint ?? "");
+      setCipherTweakFp(d.idCipherTweakFingerprint ?? "");
       setMsg(t("msgSaved"));
     } else {
       setMsg(t("msgFailed"));
@@ -301,7 +322,16 @@ function ServersSection({
     }
   }
   async function saveGhProxyUrl() {
-    const res = await api("/api/settings", "POST", { ghProxyUrl });
+    // Client-side gate before persisting; the API route should re-validate.
+    // Empty is allowed (clears the proxy). Anything non-empty must be
+    // https://host[:port] with no path/query — keeps the value safe to
+    // splice into the `wget | sudo bash` install snippet.
+    const v = ghProxyUrl.trim().replace(/\/+$/, "");
+    if (v && !/^https:\/\/[a-z0-9.-]+(?::\d+)?$/i.test(v)) {
+      setMsg(t("msgFailed"));
+      return;
+    }
+    const res = await api("/api/settings", "POST", { ghProxyUrl: v });
     setMsg(res.ok ? t("msgSaved") : t("msgFailed"));
   }
   async function rotateNodeToken(hostname: string) {
@@ -372,9 +402,12 @@ function ServersSection({
   // http(s) base for install commands. HTTP transport works whether the master
   // sits behind a WebSocket-capable proxy or not, so it's the safe default.
   const base = `${proto === "wss" ? "https" : "http"}://${origin}`;
-  // Active GitHub mirror — empty when off. Falls back to ghfast.top when
-  // enabled with a blank URL (the most common preset for mainland users).
-  const activeProxy = ghProxyEnabled ? (ghProxyUrl.trim() || "https://ghfast.top") : "";
+  // Active GitHub mirror — empty when off or when the saved URL doesn't pass
+  // the https://host[:port] allowlist. No implicit third-party fallback:
+  // silently routing every operator's install through ghfast.top means a
+  // mirror compromise pivots to root on every new node. Admin must opt in
+  // by entering an explicit, validated https mirror URL.
+  const activeProxy = ghProxyEnabled ? safeProxy(ghProxyUrl) : "";
 
   return (
     <Card>
@@ -583,9 +616,8 @@ function ServersSection({
           </p>
           <Field label={t("opaqueKey")}>
             <Input
-              value={cipherKey}
-              onChange={(e) => setCipherKey(e.target.value)}
-              onBlur={() => saveCipher({ idCipherKey: cipherKey })}
+              value={cipherKeyFp}
+              readOnly
               className="font-mono"
               spellCheck={false}
             />
@@ -593,13 +625,12 @@ function ServersSection({
           <Field label={t("opaqueTweak")}>
             <div className="flex gap-2">
               <Input
-                value={cipherTweak}
-                onChange={(e) => setCipherTweak(e.target.value)}
-                onBlur={() => saveCipher({ idCipherTweak: cipherTweak })}
+                value={cipherTweakFp}
+                readOnly
                 className="font-mono"
                 spellCheck={false}
               />
-              <Button variant="outline" size="sm" onClick={() => saveCipher({ rotateIdCipher: true })}>
+              <Button variant="outline" size="sm" onClick={rotateCipher}>
                 {t("regenerate")}
               </Button>
             </div>

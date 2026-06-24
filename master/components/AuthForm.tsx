@@ -44,6 +44,9 @@ export default function AuthForm({ mode }: { mode: "setup" | "login" }) {
       const d = await res.json().catch(() => ({}));
       if (res.ok) {
         location.href = "/settings";
+      } else if (res.status === 429) {
+        const retry = Number(res.headers.get("retry-after")) || 60;
+        setError(`Too many attempts. Try again in ${retry}s.`);
       } else {
         setError(d.error ?? `error ${res.status}`);
       }

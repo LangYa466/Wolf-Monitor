@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { latestPingResults, listPingTasks } from "@/lib/monitoring";
 import { currentUser } from "@/lib/session";
+import { logError } from "@/lib/log";
 
 // Latency feed: tasks + latest result per (task, node). Admin-only — it exposes
 // monitor targets / intervals / node assignments (infra topology).
@@ -20,7 +21,7 @@ export async function GET() {
       { headers: { "Cache-Control": "no-store" } }
     );
   } catch (err) {
-    console.error(err);
+    logError("latestPingResults failed:", err);
     return NextResponse.json({ error: "storage error" }, { status: 500 });
   }
 }

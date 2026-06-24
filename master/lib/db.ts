@@ -1,4 +1,10 @@
 import { Pool } from "pg";
+import {
+  createCipheriv,
+  createDecipheriv,
+  randomBytes,
+  scryptSync,
+} from "crypto";
 import type { HostInfo, Metrics, NodeView, Report } from "./types";
 import { encodeNodeId } from "./opaqueid";
 
@@ -69,11 +75,12 @@ function sslOption(connectionString: string) {
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS nodes (
-  id           TEXT PRIMARY KEY,
-  host         JSONB NOT NULL,
-  metrics      JSONB NOT NULL,
-  last_seen    BIGINT NOT NULL,
-  updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+  id               TEXT PRIMARY KEY,
+  host             JSONB NOT NULL,
+  metrics          JSONB NOT NULL,
+  last_seen        BIGINT NOT NULL,
+  updated_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+  last_history_ts  BIGINT NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS metrics_history (
@@ -142,6 +149,10 @@ CREATE TABLE IF NOT EXISTS ping_results (
 CREATE INDEX IF NOT EXISTS ping_results_task_node_ts
   ON ping_results (task_id, node_id, ts DESC);
 
+-- Plain-ts index makes the retention prune (WHERE ts < cutoff) cheap once
+-- the table grows.
+CREATE INDEX IF NOT EXISTS ping_results_ts ON ping_results (ts);
+
 CREATE TABLE IF NOT EXISTS app_settings (
   key   TEXT PRIMARY KEY,
   value JSONB NOT NULL
@@ -197,6 +208,9 @@ ALTER TABLE ping_tasks ADD COLUMN IF NOT EXISTS exclude BOOLEAN NOT NULL DEFAULT
 -- Same allowlist/blacklist switch on alert rules' targets column.
 ALTER TABLE alert_rules ADD COLUMN IF NOT EXISTS exclude BOOLEAN NOT NULL DEFAULT FALSE;
 
+-- Per-node history-write throttle. Added after initial release; defaults to 0.
+ALTER TABLE nodes ADD COLUMN IF NOT EXISTS last_history_ts BIGINT NOT NULL DEFAULT 0;
+
 -- Per-node admission tokens. Each node has its own token (the "key" the install
 -- script embeds). An unbound token (node_id IS NULL) is reserved for a future
 -- node and binds to the hostname on its first /api/report. Once bound, only
@@ -207,24 +221,197 @@ CREATE TABLE IF NOT EXISTS node_tokens (
   created_at BIGINT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS node_tokens_node ON node_tokens (node_id);
+
+-- Pin an unbound token to the first hostname that claimed it, so a
+-- leaked/shared legacy token can't be replayed under a different hostname.
+ALTER TABLE node_tokens ADD COLUMN IF NOT EXISTS claimed_node_id TEXT;
+
+-- Per-row sha256 of the plaintext token. All admission/authorization lookups
+-- query by token_hash instead of the plaintext token column so the equality
+-- check on the hot path is over a fixed-width digest (no length-oracle /
+-- partial-match surface area). New rows write only the hash + an encrypted
+-- envelope of the plaintext (see token_enc below); legacy rows that still
+-- have the plaintext in the token column are lazily migrated on first read.
+ALTER TABLE node_tokens ADD COLUMN IF NOT EXISTS token_hash TEXT;
+UPDATE node_tokens
+   SET token_hash = encode(digest(token, 'sha256'), 'hex')
+ WHERE token_hash IS NULL
+   AND EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'pgcrypto');
+-- pgcrypto may not be installed; new inserts always populate token_hash from
+-- the application layer, and the auth-layer lazy migration backfills any
+-- pre-pgcrypto rows on first authorize.
+CREATE UNIQUE INDEX IF NOT EXISTS node_tokens_hash ON node_tokens (token_hash);
+
+-- AES-256-GCM envelope of the plaintext admission token, wrapped under the
+-- same KEK as app_settings (see encryptEnvelope above). Lets us drop the
+-- plaintext token column without losing the install-snippet UX — operators
+-- can still pull the token out of the admin UI, but a DB dump alone no
+-- longer reveals it. Plaintext column is kept nullable for legacy rows
+-- pending lazy migration; new inserts set token=NULL.
+ALTER TABLE node_tokens ADD COLUMN IF NOT EXISTS token_enc JSONB;
+-- The original table had token TEXT PRIMARY KEY. We need to insert NULL
+-- into the token column for new rows, so swap the PK to token_hash (the
+-- unique index above already covers the equality lookup) and drop NOT NULL.
+DO $$
+BEGIN
+  ALTER TABLE node_tokens DROP CONSTRAINT IF EXISTS node_tokens_pkey;
+EXCEPTION WHEN undefined_object THEN NULL;
+END $$;
+ALTER TABLE node_tokens ALTER COLUMN token DROP NOT NULL;
+
+-- For future session listing/revoke UI.
+ALTER TABLE sessions ADD COLUMN IF NOT EXISTS last_used_at BIGINT;
+
+-- Append-only audit trail for admin/security-relevant actions.
+CREATE TABLE IF NOT EXISTS audit_log (
+  id      BIGSERIAL PRIMARY KEY,
+  ts      BIGINT NOT NULL,
+  actor   TEXT,
+  action  TEXT NOT NULL,
+  target  TEXT,
+  details JSONB
+);
+CREATE INDEX IF NOT EXISTS audit_log_ts ON audit_log (ts DESC);
+
+-- Backfill an FK from ping_results.task_id to ping_tasks.id without validating
+-- pre-existing rows (NOT VALID skips the scan). Wrapped to swallow the
+-- duplicate_object error so subsequent ensureSchema() runs are idempotent.
+DO $$
+BEGIN
+  ALTER TABLE ping_results
+    ADD CONSTRAINT ping_results_task_fk
+    FOREIGN KEY (task_id) REFERENCES ping_tasks(id) ON DELETE CASCADE NOT VALID;
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
 `;
+
+// ── app_settings envelope encryption ───────────────────────────────────────
+//
+// Several settings rows hold long-lived credentials (Telegram bot token,
+// ipinfo token, the legacy shared nodeToken, opaque-id Feistel key/tweak,
+// webhook URLs). A DB dump alone used to reveal them all in plaintext.
+//
+// We now wrap values for SENSITIVE_KEYS with AES-256-GCM under a key derived
+// from WOLF_SECRET_KEY (falling back to DATABASE_URL so existing single-env
+// deployments keep working — operators are encouraged to set WOLF_SECRET_KEY
+// explicitly). The wrapping is transparent to callers: getSetting returns the
+// plaintext, setSetting accepts the plaintext. Existing un-encrypted rows are
+// still readable (lazy upgrade — next write encrypts them).
+const SENSITIVE_KEYS = new Set<string>([
+  "nodeToken",
+  "ipinfoToken",
+  "notify",
+  "idCipherKey",
+  "idCipherTweak",
+]);
+
+interface EncryptedEnvelope {
+  _wenc: "v1";
+  iv: string;
+  ct: string;
+  tag: string;
+}
+
+function isEncryptedEnvelope(v: unknown): v is EncryptedEnvelope {
+  if (!v || typeof v !== "object") return false;
+  const o = v as Record<string, unknown>;
+  return (
+    o._wenc === "v1" &&
+    typeof o.iv === "string" &&
+    typeof o.ct === "string" &&
+    typeof o.tag === "string"
+  );
+}
+
+let CACHED_KEK: Buffer | null = null;
+function getKek(): Buffer {
+  if (CACHED_KEK) return CACHED_KEK;
+  const material =
+    process.env.WOLF_SECRET_KEY || process.env.DATABASE_URL || "";
+  if (!material) {
+    throw new Error(
+      "WOLF_SECRET_KEY (or DATABASE_URL) required to derive app_settings KEK",
+    );
+  }
+  // scryptSync is one-shot at boot; salt is a fixed app-scoped string so the
+  // same material always derives the same key — required for envelope
+  // round-tripping across restarts.
+  CACHED_KEK = scryptSync(material, "wolf-app-settings-v1", 32);
+  return CACHED_KEK;
+}
+
+export function encryptSecretAtRest(plain: string): EncryptedEnvelope {
+  return encryptEnvelope(plain);
+}
+
+export function decryptSecretAtRest(env: unknown): string | null {
+  if (!isEncryptedEnvelope(env)) return null;
+  try {
+    return decryptEnvelope(env);
+  } catch (err) {
+    console.error(
+      `decryptSecretAtRest: ${(err as Error).message}`,
+    );
+    return null;
+  }
+}
+
+function encryptEnvelope(plain: string): EncryptedEnvelope {
+  const iv = randomBytes(12);
+  const cipher = createCipheriv("aes-256-gcm", getKek(), iv);
+  const ct = Buffer.concat([cipher.update(plain, "utf8"), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return {
+    _wenc: "v1",
+    iv: iv.toString("base64"),
+    ct: ct.toString("base64"),
+    tag: tag.toString("base64"),
+  };
+}
+
+function decryptEnvelope(env: EncryptedEnvelope): string {
+  const iv = Buffer.from(env.iv, "base64");
+  const ct = Buffer.from(env.ct, "base64");
+  const tag = Buffer.from(env.tag, "base64");
+  const decipher = createDecipheriv("aes-256-gcm", getKek(), iv);
+  decipher.setAuthTag(tag);
+  const out = Buffer.concat([decipher.update(ct), decipher.final()]);
+  return out.toString("utf8");
+}
 
 // Generic key/value settings (notification config, etc.).
 export async function getSetting<T>(key: string): Promise<T | null> {
   await ensureSchema();
-  const { rows } = await getPool().query<{ value: T }>(
+  const { rows } = await getPool().query<{ value: unknown }>(
     `SELECT value FROM app_settings WHERE key = $1`,
     [key]
   );
-  return rows.length ? rows[0].value : null;
+  if (!rows.length) return null;
+  const raw = rows[0].value;
+  if (isEncryptedEnvelope(raw)) {
+    try {
+      return JSON.parse(decryptEnvelope(raw)) as T;
+    } catch (err) {
+      // Wrong KEK / tampered envelope — surface as missing rather than crash
+      // the caller. Operators see the log; users get a clean re-setup path.
+      console.error(
+        `app_settings: failed to decrypt key=${key}: ${(err as Error).message}`,
+      );
+      return null;
+    }
+  }
+  return raw as T;
 }
 
 export async function setSetting<T>(key: string, value: T): Promise<void> {
   await ensureSchema();
+  const payload = SENSITIVE_KEYS.has(key)
+    ? JSON.stringify(encryptEnvelope(JSON.stringify(value)))
+    : JSON.stringify(value);
   await getPool().query(
     `INSERT INTO app_settings (key, value) VALUES ($1, $2)
      ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
-    [key, JSON.stringify(value)]
+    [key, payload]
   );
 }
 
@@ -236,11 +423,79 @@ export async function isPublicDashboard(): Promise<boolean> {
   return (await getSetting<boolean>(PUBLIC_DASHBOARD_KEY)) === true;
 }
 
-// Strip sensitive fields from nodes before exposing them to guests. Currently
-// that's the IP; the rest (hostname, OS, country, live metrics) is non-sensitive
-// and is what makes the public "server live" view useful.
+// Strip sensitive fields from nodes before exposing them to guests. Explicit
+// allowlist: keep opaqueId/name/country/online/lastSeen/sortOrder, the OS
+// family only (drop platform/platformVersion/cpuModel/arch/hostname), and a
+// minimal metrics subset (no disk paths, no process/tcp counts, no totals).
+// Remaining typed fields are zeroed so consumers reading e.g. host.memTotal
+// degrade gracefully instead of crashing.
+function sanitizePublicHost(h: HostInfo | null | undefined): HostInfo {
+  // Coerce the raw OS string to a coarse family. Anything we don't recognise
+  // becomes "other" — never leak the original value.
+  const raw = String(h?.os ?? "").toLowerCase();
+  const family =
+    raw.includes("linux") ? "linux" :
+    raw.includes("windows") ? "windows" :
+    raw.includes("darwin") || raw.includes("mac") ? "darwin" :
+    raw.includes("freebsd") ? "freebsd" :
+    raw ? "other" : "";
+  return {
+    hostname: "",
+    os: family,
+    platform: "",
+    platformVersion: "",
+    arch: "",
+    cpuModel: "",
+    cpuCores: 0,
+    memTotal: 0,
+    swapTotal: 0,
+    diskTotal: 0,
+    bootTime: 0,
+  };
+}
+
+function sanitizePublicMetrics(m: Metrics | null | undefined): Metrics {
+  const n = (v: unknown) => (Number.isFinite(Number(v)) ? Number(v) : 0);
+  return {
+    uptime: 0,
+    cpuUsage: n(m?.cpuUsage),
+    memUsed: 0,
+    memPercent: n(m?.memPercent),
+    swapUsed: 0,
+    diskUsed: 0,
+    diskPercent: n(m?.diskPercent),
+    diskReadBytes: 0,
+    diskWriteBytes: 0,
+    diskReadSpeed: 0,
+    diskWriteSpeed: 0,
+    netSent: 0,
+    netRecv: 0,
+    netUpSpeed: n(m?.netUpSpeed),
+    netDownSpeed: n(m?.netDownSpeed),
+    load1: 0,
+    load5: 0,
+    load15: 0,
+    tcpConns: 0,
+    procs: 0,
+  };
+}
+
 export function publicNodes(nodes: NodeView[]): NodeView[] {
-  return nodes.map((n) => ({ ...n, ip: null }));
+  return nodes.map(
+    (n) =>
+      ({
+        id: n.opaqueId, // hide internal hostname id from guests
+        opaqueId: n.opaqueId,
+        name: n.name,
+        host: sanitizePublicHost(n.host),
+        metrics: sanitizePublicMetrics(n.metrics),
+        lastSeen: n.lastSeen,
+        online: n.online,
+        ip: null,
+        country: n.country,
+        sortOrder: n.sortOrder,
+      }) as NodeView,
+  );
 }
 
 // ensureSchema runs the idempotent DDL exactly once per process.
@@ -258,6 +513,61 @@ export function ensureSchema(): Promise<void> {
   return globalForDb.__llSchema;
 }
 
+// Size caps for adversarial node payloads. Anything bigger gets rejected
+// before it can bloat the row, the PK B-tree, or /api/nodes egress.
+const MAX_HOST_BYTES = 4096;
+const MAX_METRICS_BYTES = 4096;
+// RFC 1123-ish hostname (underscore tolerated for Windows). Used as nodes.id
+// PRIMARY KEY and FK across history/state tables — bound it tightly.
+const HOSTNAME_RE = /^[A-Za-z0-9._-]{1,253}$/;
+// Minimum gap between metrics_history rows per node. Caps a hostile node
+// looping POSTs at 1 history row / 5s regardless of report cadence.
+const HISTORY_MIN_INTERVAL_MS = 5_000;
+
+function sanitizeHost(h: HostInfo): HostInfo {
+  const s = (v: unknown, max: number) => String(v ?? "").slice(0, max);
+  const n = (v: unknown) => (Number.isFinite(Number(v)) ? Number(v) : 0);
+  return {
+    hostname: s(h?.hostname, 253),
+    os: s(h?.os, 64),
+    platform: s(h?.platform, 64),
+    platformVersion: s(h?.platformVersion, 64),
+    arch: s(h?.arch, 32),
+    cpuModel: s(h?.cpuModel, 128),
+    cpuCores: n(h?.cpuCores),
+    memTotal: n(h?.memTotal),
+    swapTotal: n(h?.swapTotal),
+    diskTotal: n(h?.diskTotal),
+    bootTime: n(h?.bootTime),
+  };
+}
+
+function sanitizeMetrics(m: Metrics): Metrics {
+  const n = (v: unknown) => (Number.isFinite(Number(v)) ? Number(v) : 0);
+  return {
+    uptime: n(m?.uptime),
+    cpuUsage: n(m?.cpuUsage),
+    memUsed: n(m?.memUsed),
+    memPercent: n(m?.memPercent),
+    swapUsed: n(m?.swapUsed),
+    diskUsed: n(m?.diskUsed),
+    diskPercent: n(m?.diskPercent),
+    diskReadBytes: n(m?.diskReadBytes),
+    diskWriteBytes: n(m?.diskWriteBytes),
+    diskReadSpeed: n(m?.diskReadSpeed),
+    diskWriteSpeed: n(m?.diskWriteSpeed),
+    netSent: n(m?.netSent),
+    netRecv: n(m?.netRecv),
+    netUpSpeed: n(m?.netUpSpeed),
+    netDownSpeed: n(m?.netDownSpeed),
+    load1: n(m?.load1),
+    load5: n(m?.load5),
+    load15: n(m?.load15),
+    tcpConns: n(m?.tcpConns),
+    procs: n(m?.procs),
+  };
+}
+
 // saveReport upserts the node's latest state and appends a history row.
 // `ip`/`country` are resolved by the caller (it has the request headers); when
 // omitted the existing values are preserved (COALESCE). New nodes get a
@@ -268,9 +578,20 @@ export async function saveReport(
 ): Promise<NodeView> {
   await ensureSchema();
   const pool = getPool();
-  const id = report.host.hostname || "unknown";
+  const safeHost = sanitizeHost(report.host);
+  const safeMetrics = sanitizeMetrics(report.metrics);
+  // hostname is the PK and FK target — reject anything outside a strict
+  // charset (no control chars, no whitespace, no oversized strings).
+  if (!HOSTNAME_RE.test(safeHost.hostname)) {
+    throw new Error("invalid hostname");
+  }
+  const hostJson = JSON.stringify(safeHost);
+  const metricsJson = JSON.stringify(safeMetrics);
+  if (hostJson.length > MAX_HOST_BYTES || metricsJson.length > MAX_METRICS_BYTES) {
+    throw new Error("report payload too large");
+  }
+  const id = safeHost.hostname;
   const now = Date.now();
-  const m = report.metrics;
   const ip = opts.ip ?? null;
   const country = opts.country ?? null;
 
@@ -292,37 +613,46 @@ export async function saveReport(
            ip = COALESCE($5, nodes.ip),
            country = COALESCE($6, nodes.country)
      RETURNING sort_order, country, ip, seq, name`,
-    [id, JSON.stringify(report.host), JSON.stringify(m), now, ip, country]
+    [id, hostJson, metricsJson, now, ip, country]
   );
 
-  await pool.query(
-    `INSERT INTO metrics_history
-       (node_id, ts, cpu, mem_pct, disk_pct, net_up, net_down, disk_r, disk_w,
-        procs, tcp, mem_used, swap_used)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
-    [
-      id,
-      now,
-      m.cpuUsage,
-      m.memPercent,
-      m.diskPercent,
-      m.netUpSpeed,
-      m.netDownSpeed,
-      m.diskReadSpeed,
-      m.diskWriteSpeed,
-      m.procs,
-      m.tcpConns,
-      m.memUsed,
-      m.swapUsed,
-    ]
+  // Throttle metrics_history writes per node: at most 1 row / HISTORY_MIN_INTERVAL_MS.
+  // The UPDATE acts as an atomic claim — only the caller that wins it inserts.
+  const claim = await pool.query(
+    `UPDATE nodes SET last_history_ts = $2
+       WHERE id = $1 AND $2 - last_history_ts >= $3`,
+    [id, now, HISTORY_MIN_INTERVAL_MS],
   );
+  if (claim.rowCount === 1) {
+    await pool.query(
+      `INSERT INTO metrics_history
+         (node_id, ts, cpu, mem_pct, disk_pct, net_up, net_down, disk_r, disk_w,
+          procs, tcp, mem_used, swap_used)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+      [
+        id,
+        now,
+        safeMetrics.cpuUsage,
+        safeMetrics.memPercent,
+        safeMetrics.diskPercent,
+        safeMetrics.netUpSpeed,
+        safeMetrics.netDownSpeed,
+        safeMetrics.diskReadSpeed,
+        safeMetrics.diskWriteSpeed,
+        safeMetrics.procs,
+        safeMetrics.tcpConns,
+        safeMetrics.memUsed,
+        safeMetrics.swapUsed,
+      ]
+    );
+  }
 
   return {
     id,
     opaqueId: await encodeNodeId(Number(rows[0]?.seq ?? 0)),
     name: rows[0]?.name ?? null,
-    host: report.host,
-    metrics: m,
+    host: safeHost,
+    metrics: safeMetrics,
     lastSeen: now,
     online: true,
     ip: rows[0]?.ip ?? ip,
@@ -437,26 +767,27 @@ export async function getNodeNet(
   return rows.length ? { ip: rows[0].ip, country: rows[0].country } : null;
 }
 
+// Hard cap on reorder payload — protects the single pooled DB connection
+// against a buggy/malicious client posting a multi-MB id array.
+const MAX_ORDER_IDS = 1000;
+
 // setNodeOrder persists a manual drag-reorder: ids in their new display order.
+// Collapses N updates into a single statement via unnest(), so an oversized
+// (or just plain large) admin payload can't monopolize the pool.
 export async function setNodeOrder(orderedIds: string[]): Promise<void> {
   await ensureSchema();
-  const pool = getPool();
-  const client = await pool.connect();
-  try {
-    await client.query("BEGIN");
-    for (let i = 0; i < orderedIds.length; i++) {
-      await client.query(`UPDATE nodes SET sort_order = $1 WHERE id = $2`, [
-        i,
-        orderedIds[i],
-      ]);
-    }
-    await client.query("COMMIT");
-  } catch (err) {
-    await client.query("ROLLBACK");
-    throw err;
-  } finally {
-    client.release();
+  if (orderedIds.length === 0) return;
+  if (orderedIds.length > MAX_ORDER_IDS) {
+    throw new Error("order list too large");
   }
+  const idxs = orderedIds.map((_, i) => i);
+  await getPool().query(
+    `UPDATE nodes AS n
+        SET sort_order = v.idx
+       FROM unnest($1::text[], $2::int[]) AS v(id, idx)
+      WHERE n.id = v.id`,
+    [orderedIds, idxs],
+  );
 }
 
 export interface HistoryPoint {
@@ -515,11 +846,42 @@ export async function getHistory(
 }
 
 // pruneHistory trims rows older than the retention window (best-effort).
+// Covers both metrics_history and ping_results — the latter is otherwise
+// never pruned and grows linearly with task_count × node_count × tick_rate.
 export async function pruneHistory(retentionMs = 30 * 24 * 60 * 60 * 1000) {
+  const cutoff = Date.now() - retentionMs;
+  const pool = getPool();
   try {
-    await getPool().query(`DELETE FROM metrics_history WHERE ts < $1`, [
-      Date.now() - retentionMs,
-    ]);
+    await pool.query(`DELETE FROM metrics_history WHERE ts < $1`, [cutoff]);
+  } catch {
+    /* best-effort */
+  }
+  try {
+    await pool.query(`DELETE FROM ping_results WHERE ts < $1`, [cutoff]);
+  } catch {
+    /* best-effort */
+  }
+}
+
+// writeAudit appends an audit_log row. Best-effort: never throws — auditing
+// must not break the request that triggered it.
+export async function writeAudit(
+  action: string,
+  opts: { actor?: string; target?: string; details?: unknown } = {},
+): Promise<void> {
+  try {
+    await ensureSchema();
+    await getPool().query(
+      `INSERT INTO audit_log (ts, actor, action, target, details)
+       VALUES ($1, $2, $3, $4, $5)`,
+      [
+        Date.now(),
+        opts.actor ?? null,
+        action,
+        opts.target ?? null,
+        opts.details === undefined ? null : JSON.stringify(opts.details),
+      ],
+    );
   } catch {
     /* best-effort */
   }

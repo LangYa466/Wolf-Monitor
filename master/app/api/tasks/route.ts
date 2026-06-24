@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { authorizeForHost, tokenFromHeader } from "@/lib/auth";
 import { pingTasksForNode } from "@/lib/monitoring";
+import { logError } from "@/lib/log";
 
 // Nodes poll this to learn which latency probes they should run. The token
 // must be bound to the requesting host (?host=<hostname>) — per-node tokens
@@ -24,7 +25,7 @@ export async function GET(req: NextRequest) {
       { headers: { "Cache-Control": "no-store" } }
     );
   } catch (err) {
-    console.error(err);
+    logError("pingTasksForNode failed:", err);
     return NextResponse.json({ error: "storage error" }, { status: 500 });
   }
 }

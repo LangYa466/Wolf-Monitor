@@ -10,8 +10,8 @@
 //   {{client}} -> server / node id  {{message}}-> details   {{time}} -> timestamp
 
 import { lookup } from "dns/promises";
-import { isIP } from "net";
 import { getSetting } from "./db";
+import { isIpLiteral, isPublicIp } from "./ipcheck";
 import type { NotifyConfig } from "./types";
 
 // Outbound HTTP timeout for notification calls. Bounded so a slow/blackholed
@@ -22,32 +22,7 @@ const NOTIFY_FETCH_TIMEOUT_MS = 5000;
 // IP literals or DNS names that resolve into them. Without this any admin (or
 // hijacked admin account) can pivot the master into the internal network /
 // cloud metadata service via the configurable webhook + Telegram endpoint.
-function isPrivateV4(ip: string): boolean {
-  const m = ip.match(/^(\d+)\.(\d+)\.(\d+)\.(\d+)$/);
-  if (!m) return false;
-  const a = +m[1], b = +m[2];
-  if (a === 10) return true;
-  if (a === 127) return true;
-  if (a === 0) return true;
-  if (a === 169 && b === 254) return true; // link-local + AWS/GCP metadata
-  if (a === 172 && b >= 16 && b <= 31) return true;
-  if (a === 192 && b === 168) return true;
-  if (a === 100 && b >= 64 && b <= 127) return true; // CGNAT
-  if (a >= 224) return true; // multicast + reserved
-  return false;
-}
-function isPrivateV6(ip: string): boolean {
-  const lower = ip.toLowerCase();
-  if (lower === "::1" || lower === "::") return true;
-  if (lower.startsWith("fe80:") || lower.startsWith("fec0:")) return true;
-  if (lower.startsWith("fc") || lower.startsWith("fd")) return true; // ULA
-  if (lower.startsWith("ff")) return true; // multicast
-  if (lower.startsWith("::ffff:")) {
-    const v4 = lower.slice(7);
-    if (isIP(v4) === 4) return isPrivateV4(v4);
-  }
-  return false;
-}
+// IP classification is delegated to ipaddr.js via lib/ipcheck.
 export async function assertPublicUrl(raw: string): Promise<URL> {
   let u: URL;
   try {
@@ -59,15 +34,11 @@ export async function assertPublicUrl(raw: string): Promise<URL> {
     throw new Error("notification URL must use https://");
   }
   const host = u.hostname;
-  const literal = isIP(host);
-  const addrs: Array<{ address: string; family: number }> = literal
-    ? [{ address: host, family: literal }]
-    : await lookup(host, { all: true });
+  const addrs: string[] = isIpLiteral(host)
+    ? [host]
+    : (await lookup(host, { all: true })).map((r) => r.address);
   for (const a of addrs) {
-    if (a.family === 4 && isPrivateV4(a.address)) {
-      throw new Error("notification URL resolves to a private address");
-    }
-    if (a.family === 6 && isPrivateV6(a.address)) {
+    if (!isPublicIp(a)) {
       throw new Error("notification URL resolves to a private address");
     }
   }
@@ -160,9 +131,7 @@ async function sendTelegram(cfg: NotifyConfig, text: string): Promise<void> {
       signal: AbortSignal.timeout(NOTIFY_FETCH_TIMEOUT_MS),
       redirect: "error",
     });
-    if (!res.ok) {
-      console.error("telegram notify failed:", res.status, await res.text().catch(() => ""));
-    }
+    if (!res.ok) console.error("telegram notify failed:", res.status);
   } catch (err) {
     console.error("telegram notify error:", err);
   }

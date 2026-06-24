@@ -1,9 +1,10 @@
 import { cookies } from "next/headers";
-import { SESSION_COOKIE, sessionUser, type User } from "./auth";
+import { readSessionCookie, sessionUser, type User } from "./auth";
 
 // currentUser reads the session cookie (works in route handlers and server
-// components) and returns the authenticated admin, or null.
+// components) and returns the authenticated admin, or null. Accepts either the
+// __Host-wolf_session (HTTPS) or legacy wolf_session (HTTP) variant.
 export async function currentUser(): Promise<User | null> {
   const store = await cookies();
-  return sessionUser(store.get(SESSION_COOKIE)?.value);
+  return sessionUser(readSessionCookie((n) => store.get(n)));
 }

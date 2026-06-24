@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { currentUser } from "@/lib/session";
 import { deleteNode, setNodeName } from "@/lib/db";
+import { logError } from "@/lib/log";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -23,7 +24,7 @@ export async function PATCH(
     await setNodeName(decodeURIComponent(id), body.name.slice(0, 64));
     return NextResponse.json({ ok: true });
   } catch (err) {
-    console.error("rename failed:", err);
+    logError("rename failed:", err);
     return NextResponse.json({ error: "bad request" }, { status: 400 });
   }
 }
@@ -44,7 +45,7 @@ export async function DELETE(
     await deleteNode(decodeURIComponent(id));
     return NextResponse.json({ ok: true });
   } catch (err) {
-    console.error("delete node failed:", err);
+    logError("delete node failed:", err);
     return NextResponse.json({ error: "delete failed" }, { status: 500 });
   }
 }

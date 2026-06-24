@@ -64,9 +64,11 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       .catch(() => {});
   }, [pathname]);
 
-  async function logout() {
+  async function logout(e?: React.MouseEvent) {
+    // Shift-click → revoke every session for this user (logout everywhere).
+    const all = !!(e && (e.shiftKey || e.altKey));
     try {
-      await fetch("/api/auth/logout", { method: "POST" });
+      await fetch(`/api/auth/logout${all ? "?all=1" : ""}`, { method: "POST" });
     } catch {}
     location.href = "/login";
   }

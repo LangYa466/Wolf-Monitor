@@ -38,6 +38,11 @@ jobs:
         run: |
           go vet ./...
           go build ./...
+      - name: govulncheck
+        working-directory: node
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          "$(go env GOPATH)/bin/govulncheck" ./...
 
   master:
     name: master · next build
@@ -55,6 +60,9 @@ jobs:
       - name: install
         working-directory: master
         run: pnpm install --frozen-lockfile
+      - name: audit
+        working-directory: master
+        run: pnpm audit --audit-level=high --prod
       - name: build
         working-directory: master
         run: pnpm build

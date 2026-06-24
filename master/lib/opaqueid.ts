@@ -1,4 +1,4 @@
-import { createHmac, randomBytes } from "crypto";
+import { createHash, createHmac, randomBytes } from "crypto";
 import { getSetting, setSetting } from "./db";
 
 // Opaque server IDs — hide the auto-increment `seq` behind a format-preserving
@@ -26,18 +26,28 @@ const g = globalThis as unknown as { __llIdCipher?: { key: Buffer; tweak: Buffer
 async function cipher(): Promise<{ key: Buffer; tweak: Buffer }> {
   if (g.__llIdCipher) return g.__llIdCipher;
 
-  let keyHex =
-    process.env.ID_ENCRYPTION_KEY || (await getSetting<string>(ID_KEY_SETTING)) || "";
-  let tweakHex =
-    process.env.ID_ENCRYPTION_TWEAK || (await getSetting<string>(ID_TWEAK_SETTING)) || "";
+  // Env vars are authoritative when set — never write the DB copy in that case,
+  // so an env-managed deploy doesn't end up with a phantom plaintext key in
+  // app_settings that a future operator might mistake for canonical.
+  const envKey = process.env.ID_ENCRYPTION_KEY || "";
+  const envTweak = process.env.ID_ENCRYPTION_TWEAK || "";
 
+  let keyHex = envKey;
   if (!isHex(keyHex)) {
-    keyHex = randomBytes(16).toString("hex");
-    await setSetting(ID_KEY_SETTING, keyHex);
+    keyHex = (await getSetting<string>(ID_KEY_SETTING)) || "";
+    if (!isHex(keyHex)) {
+      keyHex = randomBytes(16).toString("hex");
+      await setSetting(ID_KEY_SETTING, keyHex);
+    }
   }
+
+  let tweakHex = envTweak;
   if (!isHex(tweakHex)) {
-    tweakHex = randomBytes(8).toString("hex");
-    await setSetting(ID_TWEAK_SETTING, tweakHex);
+    tweakHex = (await getSetting<string>(ID_TWEAK_SETTING)) || "";
+    if (!isHex(tweakHex)) {
+      tweakHex = randomBytes(8).toString("hex");
+      await setSetting(ID_TWEAK_SETTING, tweakHex);
+    }
   }
 
   g.__llIdCipher = { key: Buffer.from(keyHex, "hex"), tweak: Buffer.from(tweakHex, "hex") };
@@ -54,11 +64,23 @@ export function reloadOpaqueId(): void {
   g.__llIdCipher = undefined;
 }
 
-// Read the current key/tweak as hex (generating + persisting them if unset),
-// for display in the admin settings page.
-export async function getOpaqueIdConfig(): Promise<{ key: string; tweak: string }> {
+// Short fingerprint (first 8 hex chars of SHA-256) of a secret, safe to show
+// in the admin UI so the operator can confirm rotation took effect without
+// the raw key/tweak ever crossing the wire.
+function fingerprint(buf: Buffer): string {
+  return createHash("sha256").update(buf).digest("hex").slice(0, 16);
+}
+
+// Read fingerprints of the current key/tweak (generating + persisting them if
+// unset), for display in the admin settings page. The raw secrets are never
+// returned — anyone with the cipher key can enumerate every node id, so we
+// treat them like a password hash and only expose a confirmation digest.
+export async function getOpaqueIdConfig(): Promise<{
+  keyFingerprint: string;
+  tweakFingerprint: string;
+}> {
   const { key, tweak } = await cipher();
-  return { key: key.toString("hex"), tweak: tweak.toString("hex") };
+  return { keyFingerprint: fingerprint(key), tweakFingerprint: fingerprint(tweak) };
 }
 
 // Persist new key/tweak (hex) and drop the cache. Pass undefined to leave a

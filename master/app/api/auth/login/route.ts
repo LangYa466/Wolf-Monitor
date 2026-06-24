@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
-  SESSION_COOKIE,
   createSession,
   findUser,
   isRateLimited,
   recordAttempt,
-  verifyPassword,
+  sessionCookieName,
+  verifyUserPassword,
 } from "@/lib/auth";
 import { ensureSchema } from "@/lib/db";
 import { clientIp } from "@/lib/net";
@@ -14,14 +14,31 @@ import { isSecureRequest } from "@/lib/authutil";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+// Strip CR/LF/NUL/control chars + cap length so a pg error echoing
+// connection bytes (DSN, host:port) can't leak via container logs or
+// forge log lines. Matches the safeErr pattern in app/api/report/route.ts.
+function safeErr(e: unknown, max = 200): string {
+  const msg = e instanceof Error ? `${e.name}` : "error";
+  return msg.replace(/[\r\n\x00-\x1f\x7f]/g, " ").slice(0, max);
+}
+
 export async function POST(req: NextRequest) {
   try {
     await ensureSchema();
+    // Reject oversized bodies before buffering — bounds scrypt input and JSON parse.
+    const len = Number(req.headers.get("content-length") ?? 0);
+    if (len > 4 * 1024) {
+      return NextResponse.json({ error: "payload too large" }, { status: 413 });
+    }
     const { email, password } = await req.json();
     const ip = clientIp(req.headers) ?? "unknown";
 
     if (typeof email !== "string" || typeof password !== "string") {
       return NextResponse.json({ error: "invalid request" }, { status: 400 });
+    }
+    // Length caps: same 401 as wrong-password to avoid leaking a new oracle.
+    if (email.length > 254 || password.length > 256) {
+      return NextResponse.json({ error: "invalid email or password" }, { status: 401 });
     }
 
     if (await isRateLimited(ip, email)) {
@@ -32,7 +49,7 @@ export async function POST(req: NextRequest) {
     }
 
     const user = await findUser(email);
-    const ok = user ? await verifyPassword(password, user.passwordHash) : false;
+    const ok = await verifyUserPassword(user, password);
     await recordAttempt(ip, email, ok);
 
     if (!ok || !user) {
@@ -41,16 +58,21 @@ export async function POST(req: NextRequest) {
 
     const { token, expires } = await createSession(user.id);
     const res = NextResponse.json({ ok: true, email: user.email });
-    res.cookies.set(SESSION_COOKIE, token, {
+    // Over HTTPS use the __Host- prefix (Secure + Path=/ + no Domain) so the
+    // browser refuses sibling-subdomain cookie injection. SameSite=strict on
+    // the session itself defeats top-level CSRF; pre-login nav can't yet carry
+    // a session so there's no UX regression from "strict".
+    const secure = isSecureRequest(req);
+    res.cookies.set(sessionCookieName(secure), token, {
       httpOnly: true,
-      secure: isSecureRequest(req),
-      sameSite: "lax",
+      secure,
+      sameSite: "strict",
       path: "/",
       expires,
     });
     return res;
   } catch (err) {
-    console.error("login failed:", err);
+    console.error("login failed:", safeErr(err));
     return NextResponse.json({ error: "login failed" }, { status: 500 });
   }
 }

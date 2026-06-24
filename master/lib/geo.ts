@@ -2,32 +2,48 @@
 // settings (key "ipinfoToken") so no env var is needed. Results are cached in
 // process memory keyed by IP to stay well under ipinfo's free rate limits.
 
+import { LRUCache } from "lru-cache";
 import { getSetting } from "./db";
+import { isIpLiteral } from "./ipcheck";
 import { isPrivate } from "./net";
 
-const cache = new Map<string, string | null>();
+// Bounded LRU so a pathological flood of distinct IPs can't grow the map.
+// 24h TTL — country assignments rarely change and a stale "US" beats hitting
+// the free-tier ipinfo limit.
+// Boxed so lru-cache (which forbids null/undefined values) can hold "we tried
+// and got no answer" entries alongside successful lookups.
+const cache = new LRUCache<string, { country: string | null }>({
+  max: 20_000,
+  ttl: 24 * 60 * 60_000,
+});
 
 // resolveCountry returns an ISO 3166-1 alpha-2 code (e.g. "US") or null.
 export async function resolveCountry(ip: string | null): Promise<string | null> {
   if (!ip || isPrivate(ip)) return null;
-  if (cache.has(ip)) return cache.get(ip) ?? null;
+  // Reject malformed IPs early — clientIp() reads CDN headers that node tokens
+  // can spoof; bad input would still hit ipinfo and pollute the cache.
+  if (!isIpLiteral(ip)) return null;
+  const hit = cache.get(ip);
+  if (hit !== undefined) return hit.country;
 
   try {
     const token = await getSetting<string>("ipinfoToken").catch(() => null);
-    const url =
-      `https://ipinfo.io/${encodeURIComponent(ip)}/country` +
-      (token ? `?token=${encodeURIComponent(token)}` : "");
+    const url = `https://ipinfo.io/${encodeURIComponent(ip)}/country`;
     const res = await fetch(url, {
-      headers: { accept: "text/plain" },
+      headers: {
+        accept: "text/plain",
+        ...(token ? { authorization: `Bearer ${token}` } : {}),
+      },
+      redirect: "error",
       signal: AbortSignal.timeout(4000),
     });
     if (!res.ok) {
-      cache.set(ip, null);
+      cache.set(ip, { country: null });
       return null;
     }
     const code = (await res.text()).trim().toUpperCase();
     const valid = /^[A-Z]{2}$/.test(code) ? code : null;
-    cache.set(ip, valid);
+    cache.set(ip, { country: valid });
     return valid;
   } catch {
     // Don't cache transient failures permanently — allow a later retry.

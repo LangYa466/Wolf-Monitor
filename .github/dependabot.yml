@@ -1,0 +1,36 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /master
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 10
+    versioning-strategy: increase
+    groups:
+      security-runtime:
+        patterns:
+          - next
+          - pg
+          - ws
+          - lru-cache
+          - ipaddr.js
+          - validator
+          - request-ip
+    allow:
+      - dependency-type: direct
+      - dependency-type: indirect
+    labels:
+      - dependencies
+  - package-ecosystem: gomod
+    directory: /node
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    labels:
+      - dependencies

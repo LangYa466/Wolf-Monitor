@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { currentUser } from "@/lib/session";
 import { deletePingTask } from "@/lib/monitoring";
+import { logError } from "@/lib/log";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -16,7 +17,7 @@ export async function DELETE(
     await deletePingTask(id);
     return NextResponse.json({ ok: true });
   } catch (err) {
-    console.error(err);
+    logError("deletePingTask failed:", err);
     return NextResponse.json({ error: "storage error" }, { status: 500 });
   }
 }

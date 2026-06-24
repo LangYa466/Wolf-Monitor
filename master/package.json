@@ -1,8 +1,12 @@
 {
   "name": "wolf-monitor-master",
-  "version": "1.5.5",
+  "version": "1.5.6",
   "private": true,
-  "packageManager": "pnpm@10.32.1",
+  "packageManager": "pnpm@11.9.0+sha512.bd682d5d03fe525ef7c9fd6780c6884d1e756ac4c9c9fe00c538782824310dcf90e3ddc4f53835f06dfaebd5085e41855e0bcbb3b60de2ac5bbab89e5036f03b",
+  "engines": {
+    "node": ">=20.0.0",
+    "pnpm": ">=10.0.0"
+  },
   "scripts": {
     "dev": "next dev",
     "dev:ws": "tsx server.ts",
@@ -14,13 +18,17 @@
   "dependencies": {
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "ipaddr.js": "2.4.0",
+    "lru-cache": "11.5.1",
     "lucide-react": "^1.17.0",
-    "next": "^15.5.18",
-    "pg": "^8.13.1",
+    "next": "15.5.18",
+    "pg": "8.21.0",
     "react": "19.0.0",
     "react-dom": "19.0.0",
+    "request-ip": "3.3.0",
     "tailwind-merge": "^2.6.0",
-    "ws": "^8.18.0"
+    "validator": "13.15.35",
+    "ws": "8.21.0"
   },
   "overrides": {
     "postcss": "^8.5.10"
@@ -28,13 +36,19 @@
   "pnpm": {
     "overrides": {
       "postcss": "^8.5.10"
-    }
+    },
+    "ignoredBuiltDependencies": [
+      "esbuild",
+      "sharp"
+    ]
   },
   "devDependencies": {
     "@types/node": "^22.10.5",
     "@types/pg": "^8.11.10",
     "@types/react": "^19.0.7",
     "@types/react-dom": "^19.0.3",
+    "@types/request-ip": "^0.0.41",
+    "@types/validator": "^13.15.0",
     "@types/ws": "^8.5.13",
     "autoprefixer": "^10.4.20",
     "postcss": "^8.5.10",

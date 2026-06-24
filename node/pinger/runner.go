@@ -6,11 +6,136 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"log"
+	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 )
+
+// Cap on tasks accepted per refresh. A misbehaving or compromised master
+// otherwise turns the fleet into a port scanner.
+const maxTasksPerRefresh = 256
+
+// allowPrivateTargets returns true when the operator opts in to monitoring
+// RFC1918 / loopback / link-local targets (intranet deployments).
+func allowPrivateTargets() bool {
+	v := os.Getenv("WOLF_PING_ALLOW_PRIVATE")
+	return v == "1" || strings.EqualFold(v, "true")
+}
+
+// parseTargetAllowlist reads WOLF_PING_TARGET_ALLOWLIST: comma-separated list
+// of hostnames, IPs, or CIDR ranges. When set, validateTask only accepts
+// targets that match an entry. This limits blast radius if the master is
+// compromised or MITM'd and tries to push arbitrary probe targets.
+func parseTargetAllowlist() ([]string, []*net.IPNet) {
+	raw := strings.TrimSpace(os.Getenv("WOLF_PING_TARGET_ALLOWLIST"))
+	if raw == "" {
+		return nil, nil
+	}
+	var hosts []string
+	var nets []*net.IPNet
+	for _, item := range strings.Split(raw, ",") {
+		item = strings.TrimSpace(item)
+		if item == "" {
+			continue
+		}
+		if _, n, err := net.ParseCIDR(item); err == nil {
+			nets = append(nets, n)
+			continue
+		}
+		hosts = append(hosts, strings.ToLower(item))
+	}
+	return hosts, nets
+}
+
+// targetAllowed reports whether host (a literal IP or hostname) is permitted
+// by the operator-configured allowlist. Called only when the allowlist is set.
+func targetAllowed(host string, hosts []string, nets []*net.IPNet) bool {
+	h := strings.ToLower(strings.TrimSpace(host))
+	for _, allowed := range hosts {
+		if h == allowed {
+			return true
+		}
+	}
+	if len(nets) == 0 {
+		return false
+	}
+	check := func(ip net.IP) bool {
+		for _, n := range nets {
+			if n.Contains(ip) {
+				return true
+			}
+		}
+		return false
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		return check(ip)
+	}
+	addrs, err := net.LookupIP(host)
+	if err != nil || len(addrs) == 0 {
+		return false
+	}
+	for _, ip := range addrs {
+		if !check(ip) {
+			return false
+		}
+	}
+	return true
+}
+
+// validateTask drops malformed or dangerous tasks before they reach Probe.
+// Rejects unknown types, unparseable targets, and (by default) loopback,
+// link-local (covers cloud metadata 169.254.169.254), and private ranges.
+func validateTask(t Task) bool {
+	typ := strings.ToLower(t.Type)
+	if typ != "tcp" && typ != "icmp" {
+		return false
+	}
+	if t.Target == "" || t.ID == "" {
+		return false
+	}
+	host := t.Target
+	if h, _, err := net.SplitHostPort(t.Target); err == nil {
+		host = h
+	}
+	host = strings.TrimSpace(host)
+	if host == "" {
+		return false
+	}
+	// Operator-configured allowlist takes precedence: when set, only listed
+	// hosts/IPs/CIDRs are probed regardless of what the master sends.
+	if hosts, nets := parseTargetAllowlist(); len(hosts) > 0 || len(nets) > 0 {
+		return targetAllowed(host, hosts, nets)
+	}
+	if allowPrivateTargets() {
+		return true
+	}
+	// Literal IP: check directly. Hostname: resolve and check all answers.
+	check := func(ip net.IP) bool {
+		if ip == nil {
+			return false
+		}
+		if ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsPrivate() || ip.IsUnspecified() {
+			return false
+		}
+		return true
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		return check(ip)
+	}
+	addrs, err := net.LookupIP(host)
+	if err != nil || len(addrs) == 0 {
+		return false
+	}
+	for _, ip := range addrs {
+		if !check(ip) {
+			return false
+		}
+	}
+	return true
+}
 
 // Runner polls the master for latency tasks assigned to this node, runs each on
 // its own schedule, and reports results back in batches. It reuses the node's
@@ -122,8 +247,17 @@ func (r *Runner) refresh(ctx context.Context) {
 		return
 	}
 
+	if len(payload.Tasks) > maxTasksPerRefresh {
+		log.Printf("[ping] refresh: master returned %d tasks, capping at %d", len(payload.Tasks), maxTasksPerRefresh)
+		payload.Tasks = payload.Tasks[:maxTasksPerRefresh]
+	}
+
 	seen := map[string]bool{}
 	for _, t := range payload.Tasks {
+		if !validateTask(t) {
+			log.Printf("[ping] refresh: drop task %q target=%q type=%q", t.ID, t.Target, t.Type)
+			continue
+		}
 		seen[t.ID] = true
 		r.tasks[t.ID] = t
 	}

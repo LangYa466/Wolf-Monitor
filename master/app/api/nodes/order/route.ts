@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { currentUser } from "@/lib/session";
 import { setNodeOrder } from "@/lib/db";
+import { logError } from "@/lib/log";
 
 // Persists a manual drag-reorder of nodes. Admin only.
 export const runtime = "nodejs";
@@ -17,7 +18,7 @@ export async function POST(req: NextRequest) {
     await setNodeOrder(order);
     return NextResponse.json({ ok: true });
   } catch (err) {
-    console.error(err);
+    logError("setNodeOrder failed:", err);
     return NextResponse.json({ error: "storage error" }, { status: 500 });
   }
 }

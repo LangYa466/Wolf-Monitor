@@ -156,6 +156,41 @@ ExecStart=${BIN} ${ARGS}
 Restart=always
 RestartSec=5
 User=root
+# Defense-in-depth: agent samples host metrics as root for /proc visibility
+# across all users (gopsutil needs this for per-process stats and disk I/O on
+# some filesystems). It does not need write access outside ${INSTALL_DIR},
+# kernel tunables, the ability to load modules, raw sockets, or most syscalls.
+# These flags blunt blast radius if the binary is ever compromised
+# (supply-chain, dep CVE, etc.) without breaking metric collection.
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+RestrictNamespaces=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+SystemCallArchitectures=native
+# Drop every capability — agent only needs to read /proc + open outbound
+# sockets, neither of which require any cap when running as root.
+CapabilityBoundingSet=
+AmbientCapabilities=
+# Only allow IPv4/IPv6/UNIX sockets — block AF_PACKET, AF_NETLINK rawsend, etc.
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+# Allow the standard syscall set a Go HTTP/WS client needs; deny @debug,
+# @mount, @reboot, @swap, @raw-io, ptrace, etc.
+SystemCallFilter=@system-service
+SystemCallFilter=~@debug @mount @reboot @swap @raw-io @privileged @resources
+ReadWritePaths=${INSTALL_DIR}
+UMask=0077
 
 [Install]
 WantedBy=multi-user.target

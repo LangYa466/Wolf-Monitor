@@ -152,3 +152,72 @@ Only `DATABASE_URL` is required; the rest are rarely-needed optionals.
 
 Configured in the dashboard (DB-backed) instead of env: **admin account**,
 **node token**, **ipinfo token**, **notification channels**.
+
+## Operations & key rotation
+
+Runbook for the secrets and data Wolf-Monitor stores. Report security issues
+per [`SECURITY.md`](../SECURITY.md).
+
+### Rotate the node token
+
+1. Settings → Servers → **Regenerate node token**. The old token stops
+   authenticating new connections immediately.
+2. Update every node's `-t` flag (or `WOLF_NODE_TOKEN` env) and restart it.
+   Existing WebSocket sessions are dropped on the next reconnect.
+
+### Rotate `CRON_SECRET`
+
+Only relevant if you've wired an external pinger to `/api/cron/check`.
+Change the env var on the master, redeploy, then update the caller's
+`Authorization: Bearer <secret>` header. There's no DB state to migrate.
+
+### Rotate the database password / `DATABASE_URL`
+
+1. Issue new credentials on the Postgres side (or rotate the role's password).
+2. Update `DATABASE_URL` in the master's environment and redeploy. The pool
+   reconnects with the new URL on the next request.
+3. Revoke the old credentials once you've confirmed the new ones work.
+
+### Invalidate all admin sessions
+
+Sessions are rows in the `sessions` table (the cookie holds a hash, not the
+raw token), so a SQL delete kills every active login:
+
+```sql
+DELETE FROM sessions;
+```
+
+Force this after a suspected admin-password compromise, after rotating the
+admin password from Settings → Account, or before handing the deployment to
+a new operator.
+
+### Backup & restore (PostgreSQL)
+
+Use `pg_dump` against `DATABASE_URL`:
+
+```sh
+pg_dump "$DATABASE_URL" --format=custom --file=wolf-monitor-$(date +%F-%H%M).dump
+```
+
+Restore into a fresh database:
+
+```sh
+pg_restore --clean --if-exists --dbname="$DATABASE_URL" wolf-monitor-YYYY-MM-DD-HHMM.dump
+```
+
+Take a backup **before** every deploy that includes a schema change, and
+keep at least 7 days of dumps off-host. Managed Postgres (Neon, Supabase,
+RDS) usually provides point-in-time recovery — enable it.
+
+### Verify install-script & binary integrity
+
+Releases publish SHA-256 sums for the `wolf-node` binaries alongside the
+GitHub release. Verify before running:
+
+```sh
+sha256sum -c wolf-node_linux_amd64.sha256
+```
+
+`install.ps1` pins the SHA-256 of the binary it downloads and aborts on
+mismatch; `install.sh` does the same via `sha256sum -c`. Always fetch the
+installer over HTTPS from the official repository.

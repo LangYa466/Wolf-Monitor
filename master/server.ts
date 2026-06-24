@@ -9,10 +9,12 @@
 import { createServer, type IncomingMessage } from "http";
 import type { Duplex } from "stream";
 import { parse } from "url";
-import { timingSafeEqual } from "crypto";
+import { createHash, randomBytes, timingSafeEqual } from "crypto";
 import next from "next";
 import { WebSocketServer, type WebSocket } from "ws";
 import { Pool, type PoolConfig } from "pg";
+import { LRUCache } from "lru-cache";
+import { getLegacyNodeToken, onTokenRevoked, setRuntimeCronSecret } from "./lib/auth";
 
 const dev = process.env.NODE_ENV !== "production";
 const hostname = process.env.HOST || "0.0.0.0";
@@ -26,6 +28,16 @@ const WS_MAX_CONN_PER_IP = parseInt(process.env.WOLF_WS_MAX_PER_IP || "8", 10);
 const WS_MAX_CONN_TOTAL = parseInt(process.env.WOLF_WS_MAX_TOTAL || "2000", 10);
 const WS_HEARTBEAT_MS = parseInt(process.env.WOLF_WS_HEARTBEAT_MS || "30000", 10);
 const WS_HANDSHAKE_RATE_PER_MIN = parseInt(process.env.WOLF_WS_HANDSHAKE_RPM || "120", 10);
+// Per-socket message rate + in-flight cap. Bounds the async queue depth so a
+// fast (or malicious) sender can't pile up unbounded persist() promises.
+const WS_MSG_RATE_PER_SEC = parseInt(process.env.WOLF_WS_MSG_RATE_PER_SEC || "10", 10);
+const WS_MAX_INFLIGHT = parseInt(process.env.WOLF_WS_MAX_INFLIGHT || "8", 10);
+// Only honour XFF/CF-Connecting-IP when an upstream proxy is explicitly trusted.
+// Default = untrusted: when the master is internet-facing without a proxy, a
+// node could otherwise spoof its source IP via XFF/CF-Connecting-IP and poison
+// geo/audit data. Operators behind a real proxy/CDN must opt in by setting
+// WOLF_TRUST_PROXY_HEADERS=1.
+const TRUST_PROXY_HEADERS = process.env.WOLF_TRUST_PROXY_HEADERS === "1";
 // Optional Origin allowlist (comma-separated). When unset, browser-style Origin
 // headers are rejected outright — node clients don't send Origin.
 const WS_ALLOWED_ORIGINS = (process.env.WOLF_WS_ALLOWED_ORIGINS || "")
@@ -39,10 +51,12 @@ const handle = app.getRequestHandler();
 // Real client IP for the websocket connection (honours an upstream proxy/CDN
 // in front of the self-host server), forwarded so the report route can geo-locate.
 function connIp(request: IncomingMessage): string {
-  const xff = request.headers["x-forwarded-for"];
-  if (xff) return String(xff).split(",")[0].trim();
-  const cf = request.headers["cf-connecting-ip"];
-  if (cf) return String(cf).trim();
+  if (TRUST_PROXY_HEADERS) {
+    const xff = request.headers["x-forwarded-for"];
+    if (xff) return String(xff).split(",")[0].trim();
+    const cf = request.headers["cf-connecting-ip"];
+    if (cf) return String(cf).trim();
+  }
   return request.socket?.remoteAddress || "";
 }
 
@@ -106,8 +120,41 @@ function wsAuthPoolGet(): Pool | null {
 }
 
 // Small TTL cache so a node reconnecting in a loop doesn't pound the DB.
-const tokenCache = new Map<string, { ok: boolean; expires: number }>();
 const TOKEN_CACHE_TTL_MS = 60_000;
+const tokenCache = new LRUCache<string, boolean>({
+  max: 4096,
+  ttl: TOKEN_CACHE_TTL_MS,
+});
+
+// Live socket -> token map so a revoke from the admin UI can immediately close
+// every connection still authenticated under that token (not wait for the next
+// reconnect or the 60s tokenCache TTL).
+const wsByToken = new Map<string, Set<WebSocket>>();
+function trackSocketToken(ws: WebSocket, token: string): void {
+  let set = wsByToken.get(token);
+  if (!set) {
+    set = new Set();
+    wsByToken.set(token, set);
+  }
+  set.add(ws);
+}
+function untrackSocketToken(ws: WebSocket, token: string): void {
+  const set = wsByToken.get(token);
+  if (!set) return;
+  set.delete(ws);
+  if (set.size === 0) wsByToken.delete(token);
+}
+
+onTokenRevoked((token) => {
+  tokenCache.delete(token);
+  const set = wsByToken.get(token);
+  if (!set) return;
+  for (const ws of set) {
+    try { ws.close(1008, "token revoked"); } catch {}
+    try { ws.terminate(); } catch {}
+  }
+  wsByToken.delete(token);
+});
 
 function safeEqualStr(a: string, b: string): boolean {
   const ab = Buffer.from(a);
@@ -123,39 +170,38 @@ function safeEqualStr(a: string, b: string): boolean {
 async function tokenAuthorizedAtUpgrade(token: string | null): Promise<boolean> {
   if (!token) return false;
   const cached = tokenCache.get(token);
-  const now = Date.now();
-  if (cached && cached.expires > now) return cached.ok;
+  if (cached !== undefined) return cached;
   const pool = wsAuthPoolGet();
   if (!pool) return false;
   let ok = false;
   try {
+    // Look up by token_hash so the equality is over a fixed-width digest and
+    // the DB doesn't have to store plaintext. The OR-on-plaintext branch
+    // catches ancient rows whose token_hash hasn't been backfilled yet
+    // (pre-pgcrypto deployments); the auth layer lazily migrates them on
+    // the first authorize.
+    const digest = createHash("sha256").update(token).digest("hex");
     const { rows } = await pool.query<{ "?column?": number }>(
-      `SELECT 1 FROM node_tokens WHERE token = $1 LIMIT 1`,
-      [token],
+      `SELECT 1 FROM node_tokens
+        WHERE token_hash = $1 OR (token_hash IS NULL AND token = $2)
+        LIMIT 1`,
+      [digest, token],
     );
     if (rows.length) {
       ok = true;
     } else {
-      const { rows: legacy } = await pool.query<{ value: unknown }>(
-        `SELECT value FROM app_settings WHERE key = 'nodeToken'`,
-      );
-      if (legacy.length) {
-        // app_settings.value is JSONB; pg returns the parsed value.
-        const expected = typeof legacy[0].value === "string" ? legacy[0].value : null;
-        if (expected) ok = safeEqualStr(token, expected);
-      }
+      // Route via getLegacyNodeToken so the envelope-encrypted nodeToken row
+      // is decrypted through the same KEK as the rest of app_settings. A raw
+      // `SELECT value FROM app_settings` here would compare the bearer token
+      // against a sealed blob and always fail closed after the migration.
+      const expected = await getLegacyNodeToken().catch(() => null);
+      if (expected) ok = safeEqualStr(token, expected);
     }
   } catch (err) {
     console.error("[ws-auth] db lookup failed:", (err as Error).message);
     ok = false;
   }
-  tokenCache.set(token, { ok, expires: now + TOKEN_CACHE_TTL_MS });
-  // Bound cache size so a flood of bad tokens can't grow the map unboundedly.
-  if (tokenCache.size > 4096) {
-    const cutoff = now;
-    for (const [k, v] of tokenCache) if (v.expires <= cutoff) tokenCache.delete(k);
-    if (tokenCache.size > 4096) tokenCache.clear();
-  }
+  tokenCache.set(token, ok);
   return ok;
 }
 
@@ -197,10 +243,11 @@ app.prepare().then(() => {
   // Per-connection: heartbeat + payload cap already set on the server. Each
   // frame's `token` is still authoritative — /api/report validates it against
   // node_tokens. The upgrade-time Bearer check just stops anonymous flooders.
-  wss.on("connection", (ws: WebSocket, request: IncomingMessage) => {
+  wss.on("connection", (ws: WebSocket, request: IncomingMessage, token: string) => {
     const ip = connIp(request);
     wsConnTotal++;
     wsConnPerIp.set(ip, (wsConnPerIp.get(ip) || 0) + 1);
+    trackSocketToken(ws, token);
 
     let alive = true;
     ws.on("pong", () => {
@@ -221,9 +268,29 @@ app.prepare().then(() => {
       const n = (wsConnPerIp.get(ip) || 1) - 1;
       if (n <= 0) wsConnPerIp.delete(ip);
       else wsConnPerIp.set(ip, n);
+      untrackSocketToken(ws, token);
     };
 
+    // Per-socket sliding window + in-flight cap. Bounds CPU/JSON.parse and the
+    // depth of pending persist() calls per connection.
+    let windowStart = Date.now();
+    let windowCount = 0;
+    let inflight = 0;
+    let pinnedHost: string | null = null;
     ws.on("message", async (data) => {
+      const now = Date.now();
+      if (now - windowStart > 1000) {
+        windowStart = now;
+        windowCount = 0;
+      }
+      if (++windowCount > WS_MSG_RATE_PER_SEC) {
+        try { ws.close(1008, "rate limit"); } catch {}
+        return;
+      }
+      if (inflight >= WS_MAX_INFLIGHT) {
+        // drop frame; node will resend on next interval
+        return;
+      }
       let report: NodeReport;
       try {
         report = JSON.parse(data.toString());
@@ -231,10 +298,18 @@ app.prepare().then(() => {
         return; // ignore malformed frames
       }
       if (!report?.host?.hostname || !report?.metrics) return;
+      // Pin hostname to first valid frame; downstream /api/report enforces
+      // token<->hostname binding too, this is defense-in-depth against the
+      // legacy shared-token transport spoofing one connection across hosts.
+      if (pinnedHost === null) pinnedHost = report.host.hostname;
+      else if (pinnedHost !== report.host.hostname) return;
+      inflight++;
       try {
         await persist(report, ip);
       } catch (err) {
         console.error("[ws] persist failed:", (err as Error).message);
+      } finally {
+        inflight--;
       }
     });
 
@@ -295,31 +370,47 @@ app.prepare().then(() => {
       return denyUpgrade(socket, 401, "Unauthorized");
     }
 
+    const authedToken = token;
     wss.handleUpgrade(request, socket, head, (ws) => {
-      wss.emit("connection", ws, request);
+      wss.emit("connection", ws, request, authedToken);
     });
   });
 
   // Self-host evaluation loop: drive /api/cron/check so load + offline alerts
-  // fire without an external scheduler.
+  // fire without an external scheduler. cronValid() now fails closed, so when
+  // CRON_SECRET is unset we mint an ephemeral secret and register it with the
+  // auth module — the public endpoint stays locked while the loopback tick
+  // still authenticates.
   const EVAL_INTERVAL_MS = parseInt(process.env.EVAL_INTERVAL_MS || "30000", 10);
-  const cronSecret = process.env.CRON_SECRET || "";
+  let cronSecret = process.env.CRON_SECRET || "";
   if (!cronSecret) {
-    console.warn(
-      "[wolf] WARNING: CRON_SECRET not set — /api/cron/check is unauthenticated. " +
-        "Set CRON_SECRET to require Authorization: Bearer <secret>.",
+    cronSecret = randomBytes(24).toString("base64url");
+    console.log(
+      "[wolf] CRON_SECRET not set — generated an ephemeral runtime secret. " +
+        "Set CRON_SECRET in env to authenticate external cron callers.",
     );
   }
+  setRuntimeCronSecret(cronSecret);
   async function tick(): Promise<void> {
     try {
       await fetch(`http://127.0.0.1:${port}/api/cron/check`, {
-        headers: cronSecret ? { authorization: `Bearer ${cronSecret}` } : {},
+        headers: { authorization: `Bearer ${cronSecret}` },
       });
     } catch (err) {
       console.error("[eval] tick failed:", (err as Error).message);
     }
   }
-  setInterval(tick, EVAL_INTERVAL_MS);
+  // Jittered scheduler so multi-replica deploys don't synchronize their
+  // pruneHistory/eval DB scans on the same wall-clock instant.
+  const JITTER_FRAC = 0.1;
+  function scheduleNext(): void {
+    const delta = EVAL_INTERVAL_MS * (1 + (Math.random() * 2 - 1) * JITTER_FRAC);
+    setTimeout(async () => {
+      await tick();
+      scheduleNext();
+    }, delta);
+  }
+  setTimeout(scheduleNext, Math.random() * EVAL_INTERVAL_MS);
 
   server.listen(port, hostname, () => {
     console.log(`> Wolf-Monitor master ready on http://${hostname}:${port}`);

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { currentUser } from "@/lib/session";
 import { latencyHistoryForNode, pingTasksForNode } from "@/lib/monitoring";
+import { logError } from "@/lib/log";
 
 // Per-node latency time-series, grouped by task. Admin-only (mirrors
 // /api/ping-results — exposes monitor targets / topology).
@@ -17,8 +18,12 @@ export async function GET(
   const { id } = await params;
   const sp = req.nextUrl.searchParams;
   const limit = Math.min(Number(sp.get("limit") ?? 240) || 240, 2000);
-  const windowMs = Math.max(Number(sp.get("window") ?? 0) || 0, 0);
-  const sinceMs = windowMs > 0 ? Date.now() - windowMs : undefined;
+  // Clamp window to pruneHistory retention (30d) so admins can't ask the
+  // planner for nonsense values like window=9999999999.
+  const MAX_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
+  const rawWindow = Math.max(Number(sp.get("window") ?? 0) || 0, 0);
+  const windowMs = Math.min(rawWindow || MAX_WINDOW_MS, MAX_WINDOW_MS);
+  const sinceMs = Date.now() - windowMs;
 
   try {
     const nodeId = decodeURIComponent(id);
@@ -33,7 +38,7 @@ export async function GET(
       { headers: { "Cache-Control": "no-store" } },
     );
   } catch (err) {
-    console.error("latencyHistoryForNode failed:", err);
+    logError("latencyHistoryForNode failed:", err);
     return NextResponse.json({ error: "storage error" }, { status: 500 });
   }
 }

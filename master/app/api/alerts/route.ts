@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { currentUser } from "@/lib/session";
 import { listAlertRules, upsertAlertRule } from "@/lib/monitoring";
+import { logError } from "@/lib/log";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -11,7 +12,7 @@ export async function GET() {
   try {
     return NextResponse.json({ rules: await listAlertRules() });
   } catch (err) {
-    console.error(err);
+    logError("listAlertRules failed:", err);
     return NextResponse.json({ error: "storage error" }, { status: 500 });
   }
 }
@@ -23,7 +24,7 @@ export async function POST(req: NextRequest) {
     const rule = await upsertAlertRule(await req.json());
     return NextResponse.json({ rule });
   } catch (err) {
-    console.error(err);
+    logError("upsertAlertRule failed:", err);
     return NextResponse.json({ error: "bad request" }, { status: 400 });
   }
 }

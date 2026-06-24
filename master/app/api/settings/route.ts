@@ -5,8 +5,10 @@ import {
   deleteNodeToken,
   ensureNodeToken,
   ensureTokenForNode,
+  findUser,
   listNodeTokens,
   rotateTokenForNode,
+  verifyUserPassword,
 } from "@/lib/auth";
 import { getPool, getSetting, setSetting, PUBLIC_DASHBOARD_KEY } from "@/lib/db";
 import { getOpaqueIdConfig, setOpaqueIdConfig, rotateOpaqueId } from "@/lib/opaqueid";
@@ -26,8 +28,12 @@ interface SettingsResponse {
   publicDashboard: boolean;
   ghProxyEnabled: boolean;
   ghProxyUrl: string;
-  idCipherKey: string;
-  idCipherTweak: string;
+  // Fingerprints only — the raw key/tweak are secrets equivalent to a
+  // password hash (anyone with them can enumerate every node id), so we
+  // never echo them back over the wire. Operators verify rotation by
+  // watching the fingerprint change.
+  idCipherKeyFingerprint: string;
+  idCipherTweakFingerprint: string;
   // hostname → that node's unique token (auto-created on first read so the
   // admin always has a copy-paste install command available).
   nodeTokens: Record<string, string>;
@@ -35,10 +41,20 @@ interface SettingsResponse {
   // before they've first reported.
   unboundTokens: Array<{ token: string; createdAt: number }>;
   // The DATABASE_URL the worker is using right now, so the admin can verify
-  // which DB is connected from the UI. Sensitive (contains credentials);
-  // surfaced ONLY in the admin-only settings endpoint and blurred client-side
-  // until hover.
+  // which DB is connected from the UI. Password is redacted server-side so
+  // the credential never crosses the wire / lands in HARs / extensions.
   databaseUrl: string;
+}
+
+function redactDatabaseUrl(raw: string | undefined): string {
+  if (!raw) return "";
+  try {
+    const u = new URL(raw);
+    if (u.password) u.password = "***";
+    return u.toString();
+  } catch {
+    return "(unparseable)";
+  }
 }
 
 async function buildResponse(): Promise<SettingsResponse> {
@@ -66,11 +82,11 @@ async function buildResponse(): Promise<SettingsResponse> {
     publicDashboard,
     ghProxyEnabled,
     ghProxyUrl,
-    idCipherKey: idCipher.key,
-    idCipherTweak: idCipher.tweak,
+    idCipherKeyFingerprint: idCipher.keyFingerprint,
+    idCipherTweakFingerprint: idCipher.tweakFingerprint,
     nodeTokens,
     unboundTokens,
-    databaseUrl: process.env.DATABASE_URL ?? "",
+    databaseUrl: redactDatabaseUrl(process.env.DATABASE_URL),
   };
 }
 
@@ -78,15 +94,18 @@ export async function GET() {
   if (!(await currentUser()))
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   try {
-    return NextResponse.json(await buildResponse());
+    return NextResponse.json(await buildResponse(), {
+      headers: { "Cache-Control": "no-store, private" },
+    });
   } catch (err) {
-    console.error(err);
+    console.error("settings GET failed:", errCode(err));
     return NextResponse.json({ error: "storage error" }, { status: 500 });
   }
 }
 
 export async function POST(req: NextRequest) {
-  if (!(await currentUser()))
+  const user = await currentUser();
+  if (!user)
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   try {
     const body = await req.json();
@@ -119,20 +138,49 @@ export async function POST(req: NextRequest) {
     if (typeof body.ghProxyUrl === "string") {
       await setSetting("ghProxyUrl", body.ghProxyUrl.trim());
     }
-    if (body.rotateIdCipher === true) {
-      await rotateOpaqueId();
-    } else if (
+    // Cipher key/tweak are equivalent to a password hash: anyone with them
+    // can derive every node's opaque id. Require a fresh-auth confirmation
+    // (current admin's password) before rotating or setting them, so a
+    // stolen session cookie alone can't pivot to silent enumeration.
+    const wantsCipherWrite =
+      body.rotateIdCipher === true ||
       typeof body.idCipherKey === "string" ||
-      typeof body.idCipherTweak === "string"
-    ) {
-      await setOpaqueIdConfig(
-        typeof body.idCipherKey === "string" ? body.idCipherKey.trim() : undefined,
-        typeof body.idCipherTweak === "string" ? body.idCipherTweak.trim() : undefined,
-      );
+      typeof body.idCipherTweak === "string";
+    if (wantsCipherWrite) {
+      if (typeof body.password !== "string" || body.password.length === 0) {
+        return NextResponse.json(
+          { error: "password required" },
+          { status: 403 },
+        );
+      }
+      const fresh = await findUser(user.email);
+      if (!(await verifyUserPassword(fresh, body.password))) {
+        return NextResponse.json({ error: "bad password" }, { status: 403 });
+      }
+      if (body.rotateIdCipher === true) {
+        await rotateOpaqueId();
+      } else {
+        await setOpaqueIdConfig(
+          typeof body.idCipherKey === "string" ? body.idCipherKey.trim() : undefined,
+          typeof body.idCipherTweak === "string" ? body.idCipherTweak.trim() : undefined,
+        );
+      }
     }
-    return NextResponse.json(await buildResponse());
+    return NextResponse.json(await buildResponse(), {
+      headers: { "Cache-Control": "no-store, private" },
+    });
   } catch (err) {
-    console.error(err);
+    console.error("settings POST failed:", errCode(err));
     return NextResponse.json({ error: "bad request" }, { status: 400 });
   }
+}
+
+// errCode extracts only the error name/code/status — never the message or pg
+// `detail` field, which can echo offending column values into logs.
+function errCode(e: unknown): string {
+  if (!e || typeof e !== "object") return "unknown";
+  const r = e as Record<string, unknown>;
+  const name = typeof r.name === "string" ? r.name : "Error";
+  const code = r.code != null ? String(r.code) : "";
+  return code ? `${name}(${code})` : name;
 }

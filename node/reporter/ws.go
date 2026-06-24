@@ -48,9 +48,6 @@ func (w *WSReporter) endpoint() (string, error) {
 	if u.Path == "" || u.Path == "/" {
 		u.Path = "/api/ws/node"
 	}
-	q := u.Query()
-	q.Set("token", w.token)
-	u.RawQuery = q.Encode()
 	return u.String(), nil
 }
 

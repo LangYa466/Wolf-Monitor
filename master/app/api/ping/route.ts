@@ -1,7 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { nodeForToken, tokenFromHeader } from "@/lib/auth";
 import { savePingResults } from "@/lib/monitoring";
+import { clientIp } from "@/lib/net";
+import { takeToken, retryAfterSec } from "@/lib/ratelimit";
+import { logError } from "@/lib/log";
 import type { PingResult } from "@/lib/types";
+
+const RL_CAPACITY = 30;
+const RL_REFILL = 15;
 
 // Nodes POST latency results here (batch). Token MUST be bound to a node — the
 // bound hostname is enforced on every row so a compromised node can't forge
@@ -10,6 +16,14 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function POST(req: NextRequest) {
+  const rlIp = clientIp(req.headers) ?? "unknown";
+  if (!takeToken(`ip:${rlIp}`, RL_CAPACITY, RL_REFILL)) {
+    return NextResponse.json(
+      { error: "rate limited" },
+      { status: 429, headers: { "Retry-After": String(retryAfterSec(RL_REFILL)) } },
+    );
+  }
+
   const token = tokenFromHeader(req.headers.get("authorization"));
   const boundHost = await nodeForToken(token);
   if (!boundHost) {
@@ -24,18 +38,29 @@ export async function POST(req: NextRequest) {
   } catch {
     return NextResponse.json({ error: "invalid json" }, { status: 400 });
   }
+  // Bounds: latency in [-1, 60000] (-1 = unreachable sentinel; 60s caps absurd
+  // values that would break chart y-axes). Reject NaN/Infinity via isFinite.
   const results = (body.results ?? []).filter(
     (r) =>
       r &&
-      r.taskId &&
+      typeof r.taskId === "string" &&
+      r.taskId.length > 0 &&
+      r.taskId.length <= 128 &&
       r.nodeId === boundHost &&
-      typeof r.latencyMs === "number",
+      typeof r.ts === "number" &&
+      Number.isFinite(r.ts) &&
+      r.ts > 0 &&
+      typeof r.success === "boolean" &&
+      typeof r.latencyMs === "number" &&
+      Number.isFinite(r.latencyMs) &&
+      r.latencyMs >= -1 &&
+      r.latencyMs <= 60_000,
   );
   try {
     await savePingResults(results);
     return NextResponse.json({ ok: true, stored: results.length });
   } catch (err) {
-    console.error(err);
+    logError("savePingResults failed:", err);
     return NextResponse.json({ error: "storage error" }, { status: 500 });
   }
 }

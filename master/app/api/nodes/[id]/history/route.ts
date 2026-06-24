@@ -1,9 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getHistory, isPublicDashboard } from "@/lib/db";
 import { currentUser } from "@/lib/session";
+import { clientIp } from "@/lib/net";
+import { retryAfterSec, takeToken } from "@/lib/ratelimit";
+import { logError } from "@/lib/log";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+
+// Guest fan-out cap — mirror /api/nodes so anonymous callers can't pin the
+// 1-connection pg pool with parallel history requests.
+const GUEST_RL_CAPACITY = 30;
+const GUEST_RL_REFILL_PER_SEC = 0.5;
 
 export async function GET(
   req: NextRequest,
@@ -16,11 +24,33 @@ export async function GET(
   if (!user && !(await isPublicDashboard())) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
+  if (!user) {
+    const ip = clientIp(req.headers) ?? "unknown";
+    if (!takeToken(`ip-guest:${ip}`, GUEST_RL_CAPACITY, GUEST_RL_REFILL_PER_SEC)) {
+      const retry = retryAfterSec(GUEST_RL_REFILL_PER_SEC);
+      return NextResponse.json(
+        { error: "rate limited" },
+        { status: 429, headers: { "Retry-After": String(retry) } },
+      );
+    }
+  }
 
   const sp = req.nextUrl.searchParams;
-  const limit = Math.min(Number(sp.get("limit") ?? 240) || 240, 2000);
-  const windowMs = Math.max(Number(sp.get("window") ?? 0) || 0, 0);
-  const sinceMs = windowMs > 0 ? Date.now() - windowMs : undefined;
+  const isGuest = !user;
+  const limit = Math.min(
+    Number(sp.get("limit") ?? 240) || 240,
+    isGuest ? 240 : 2000
+  );
+  // Clamp window to pruneHistory retention (30d) so guests/admins can't ask
+  // the planner for nonsense values; guests are further capped to 24h.
+  const MAX_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
+  const GUEST_WINDOW_MS = 24 * 60 * 60 * 1000;
+  const rawWindow = Math.max(Number(sp.get("window") ?? 0) || 0, 0);
+  const windowMs = Math.min(
+    rawWindow || (isGuest ? GUEST_WINDOW_MS : MAX_WINDOW_MS),
+    isGuest ? GUEST_WINDOW_MS : MAX_WINDOW_MS
+  );
+  const sinceMs = Date.now() - windowMs;
 
   try {
     const points = await getHistory(id, limit, sinceMs);
@@ -29,7 +59,7 @@ export async function GET(
       { headers: { "Cache-Control": "no-store" } }
     );
   } catch (err) {
-    console.error("getHistory failed:", err);
+    logError("getHistory failed:", err);
     return NextResponse.json({ error: "storage error" }, { status: 500 });
   }
 }

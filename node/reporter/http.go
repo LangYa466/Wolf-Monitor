@@ -29,7 +29,12 @@ func NewHTTP(base, token string, insecure bool) *HTTPReporter {
 	endpoint = strings.Replace(endpoint, "ws://", "http://", 1)
 	endpoint += "/api/report"
 
-	tr := &http.Transport{}
+	tr := &http.Transport{
+		MaxIdleConnsPerHost:   2,
+		IdleConnTimeout:       90 * time.Second,
+		ResponseHeaderTimeout: 10 * time.Second,
+		TLSHandshakeTimeout:   10 * time.Second,
+	}
 	if insecure {
 		tr.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
 	}

@@ -203,8 +203,9 @@ const zhHant: Dict = {
   secOpaque: "伺服器連結 ID（進階）",
   opaqueWarn:
     "此金鑰用於產生伺服器頁面網址中的不透明 ID。除非你清楚其用途，否則不建議更動——變更後既有的伺服器連結會全部失效。",
-  opaqueKey: "加密金鑰 (hex)",
-  opaqueTweak: "Tweak (hex)",
+  opaqueKey: "金鑰指紋",
+  opaqueTweak: "Tweak 指紋",
+  opaqueRotatePrompt: "請再次輸入密碼以重新產生不透明 ID 金鑰：",
   regenerate: "重新隨機產生",
 
   // ── admin: latency view ──────────────────────────────────────────
@@ -397,8 +398,9 @@ const en: Dict = {
   secOpaque: "Server link ID (advanced)",
   opaqueWarn:
     "This key generates the opaque ID used in server page URLs. We don't recommend changing it unless you know what it's for — doing so invalidates all existing server links.",
-  opaqueKey: "Encryption key (hex)",
-  opaqueTweak: "Tweak (hex)",
+  opaqueKey: "Key fingerprint",
+  opaqueTweak: "Tweak fingerprint",
+  opaqueRotatePrompt: "Re-enter your admin password to rotate the opaque-id cipher:",
   regenerate: "Regenerate randomly",
 
   // ── admin: latency view ──────────────────────────────────────────

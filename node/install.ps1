@@ -121,10 +121,32 @@ $binPath = "`"$Bin`" $argList"
 
 # ── install as a Windows service ────────────────────────────────────────────
 Info "creating service '$ServiceName'"
+# Defense-in-depth: run as the per-service virtual account `NT SERVICE\wolf-node`
+# instead of LocalSystem. Virtual accounts have no password, get a per-service
+# SID, and on Windows still have enough rights to query WMI/PDH counters that
+# gopsutil needs — but cannot tamper with arbitrary system state the way
+# LocalSystem can if the binary is ever compromised.
 # start= auto registers the service for automatic start at every boot.
-sc.exe create $ServiceName binPath= "$binPath" start= auto DisplayName= "Wolf-Monitor node" | Out-Null
+sc.exe create $ServiceName binPath= "$binPath" start= auto `
+  obj= "NT SERVICE\$ServiceName" `
+  DisplayName= "Wolf-Monitor node" | Out-Null
 sc.exe description $ServiceName "Wolf-Monitor monitoring probe" | Out-Null
 sc.exe failure $ServiceName reset= 0 actions= restart/5000 | Out-Null
+# Grant the install dir to the virtual account so the service can read its
+# binary and write logs/cache without needing broader filesystem rights.
+try {
+  $acl = Get-Acl $InstallDir
+  $rule = New-Object System.Security.AccessControl.FileSystemAccessRule(
+    "NT SERVICE\$ServiceName",
+    "ReadAndExecute,Write",
+    "ContainerInherit,ObjectInherit",
+    "None",
+    "Allow")
+  $acl.AddAccessRule($rule)
+  Set-Acl -Path $InstallDir -AclObject $acl
+} catch {
+  Info "WARNING: could not grant ACL to NT SERVICE\$ServiceName ($_) — service may fail to start"
+}
 Start-Service $ServiceName
 
 Info "installed '$ServiceName' — started now AND set to auto-start on boot"
