@@ -5,6 +5,7 @@ import (
 	"os/exec"
 	"regexp"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -62,7 +63,7 @@ func (r *Runner) maybeSelfUpdate(desired string) {
 	}
 
 	log.Printf("[update] master wants %s, have %s — running install.sh", tag, r.ownVersion)
-	if err := runInstallScript(r.masterArg, r.token, tag); err != nil {
+	if err := runInstallScript(r.masterArg, r.token, tag, r.transport, r.interval); err != nil {
 		// install.sh exits non-zero on download/checksum/systemd failure. We
 		// fall through and keep running the old binary; the next refresh
 		// after `updateCooldown` will retry.
@@ -85,36 +86,44 @@ func (r *Runner) maybeSelfUpdate(desired string) {
 //
 // Inputs flow through systemd-run's argv (-- ... ARG ARG) and bash's $1/$2/$3,
 // so a token like `; rm -rf /` stays a literal positional arg the whole way.
-func runInstallScript(master, token, version string) error {
+func runInstallScript(master, token, version, transport string, interval int) error {
+	if transport == "" {
+		transport = "ws"
+	}
+	if interval <= 0 {
+		interval = 3
+	}
+	intervalStr := strconv.Itoa(interval)
 	const script = `set -e
 url="https://raw.githubusercontent.com/LangYa466/Wolf-Monitor/main/node/install.sh"
 if command -v curl >/dev/null 2>&1; then
-  bash <(curl -fsSL --max-time 60 "$url") -e "$1" -t "$2" -V "$3"
+  bash <(curl -fsSL --max-time 60 "$url") -e "$1" -t "$2" -V "$3" -T "$4" -i "$5"
 else
-  bash <(wget -qO- --timeout=60 "$url") -e "$1" -t "$2" -V "$3"
+  bash <(wget -qO- --timeout=60 "$url") -e "$1" -t "$2" -V "$3" -T "$4" -i "$5"
 fi`
 	// Try systemd-run first (always present on a systemd host). Falls back
 	// to plain setsid for non-systemd setups even though install.sh wouldn't
 	// work there — at least the helper survives the wolf-node SIGTERM.
+	args := []string{"-c", script, "wolf-update", master, token, version, transport, intervalStr}
 	if path, err := exec.LookPath("systemd-run"); err == nil {
-		cmd := exec.Command(path,
+		full := append([]string{
 			"--collect", "--no-block",
 			"--unit", "wolf-node-update",
 			"--description", "wolf-node self-update",
-			"bash", "-c", script, "wolf-update", master, token, version,
-		)
+			"bash",
+		}, args...)
+		cmd := exec.Command(path, full...)
 		cmd.Stdout = log.Writer()
 		cmd.Stderr = log.Writer()
 		return cmd.Run()
 	}
 	if path, err := exec.LookPath("setsid"); err == nil {
-		cmd := exec.Command(path, "bash", "-c", script, "wolf-update", master, token, version)
+		cmd := exec.Command(path, append([]string{"bash"}, args...)...)
 		cmd.Stdout = log.Writer()
 		cmd.Stderr = log.Writer()
 		return cmd.Start()
 	}
-	// Last resort — runs in our cgroup, may be killed mid-replace.
-	cmd := exec.Command("bash", "-c", script, "wolf-update", master, token, version)
+	cmd := exec.Command("bash", args...)
 	cmd.Stdout = log.Writer()
 	cmd.Stderr = log.Writer()
 	return cmd.Run()

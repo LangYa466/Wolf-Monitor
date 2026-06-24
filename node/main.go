@@ -50,7 +50,7 @@ func main() {
 	// and reports results over http. Also threads the build version through
 	// so the runner can see `desiredAgentVersion` in /api/tasks responses and
 	// self-update via install.sh when the admin sets a new target.
-	go pinger.NewRunnerWithVersion(cfg.Master, cfg.Token, hostInfo.Hostname, cfg.Insecure, Version).Run(ctx)
+	go pinger.NewRunnerFull(cfg.Master, cfg.Token, hostInfo.Hostname, cfg.Insecure, cfg.Transport, cfg.Interval, Version).Run(ctx)
 
 	// Prime the collector so the first reported sample carries real IO/net rates.
 	col.Collect(ctx)

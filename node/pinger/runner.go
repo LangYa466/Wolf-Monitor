@@ -145,6 +145,8 @@ type Runner struct {
 	token      string
 	hostname   string
 	masterArg  string // original master URL (for install.sh -e)
+	transport  string // original transport (ws|http) — preserved by self-update
+	interval   int    // original report interval seconds — preserved by self-update
 	ownVersion string // build version (for "do I need to update?" check)
 	client     *http.Client
 
@@ -158,13 +160,14 @@ type Runner struct {
 }
 
 func NewRunner(master, token, hostname string, insecure bool) *Runner {
-	return NewRunnerWithVersion(master, token, hostname, insecure, "")
+	return NewRunnerFull(master, token, hostname, insecure, "ws", 3, "")
 }
 
-// NewRunnerWithVersion is the same as NewRunner but threads the build
-// version through so refresh() can compare against the master's directive.
-// Kept as a separate entry point so existing callers don't break.
-func NewRunnerWithVersion(master, token, hostname string, insecure bool, ownVersion string) *Runner {
+// NewRunnerFull threads the build version, transport, and interval through so
+// self-update can re-install with the same wire settings the node was started
+// with. Without these, install.sh -V would default transport back to ws and
+// interval to 3, silently changing the node's behaviour after an upgrade.
+func NewRunnerFull(master, token, hostname string, insecure bool, transport string, interval int, ownVersion string) *Runner {
 	base := strings.TrimRight(master, "/")
 	base = strings.Replace(base, "wss://", "https://", 1)
 	base = strings.Replace(base, "ws://", "http://", 1)
@@ -178,6 +181,8 @@ func NewRunnerWithVersion(master, token, hostname string, insecure bool, ownVers
 		token:      token,
 		hostname:   hostname,
 		masterArg:  master,
+		transport:  transport,
+		interval:   interval,
 		ownVersion: ownVersion,
 		client:     &http.Client{Timeout: 15 * time.Second, Transport: tr},
 		tasks:      map[string]Task{},
