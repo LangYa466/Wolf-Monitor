@@ -423,72 +423,21 @@ export async function isPublicDashboard(): Promise<boolean> {
   return (await getSetting<boolean>(PUBLIC_DASHBOARD_KEY)) === true;
 }
 
-// Strip sensitive fields from nodes before exposing them to guests. Explicit
-// allowlist: keep opaqueId/name/country/online/lastSeen/sortOrder, the OS
-// family only (drop platform/platformVersion/cpuModel/arch/hostname), and a
-// minimal metrics subset (no disk paths, no process/tcp counts, no totals).
-// Remaining typed fields are zeroed so consumers reading e.g. host.memTotal
-// degrade gracefully instead of crashing.
-function sanitizePublicHost(h: HostInfo | null | undefined): HostInfo {
-  // Coerce the raw OS string to a coarse family. Anything we don't recognise
-  // becomes "other" — never leak the original value.
-  const raw = String(h?.os ?? "").toLowerCase();
-  const family =
-    raw.includes("linux") ? "linux" :
-    raw.includes("windows") ? "windows" :
-    raw.includes("darwin") || raw.includes("mac") ? "darwin" :
-    raw.includes("freebsd") ? "freebsd" :
-    raw ? "other" : "";
-  return {
-    hostname: "",
-    os: family,
-    platform: "",
-    platformVersion: "",
-    arch: "",
-    cpuModel: "",
-    cpuCores: 0,
-    memTotal: 0,
-    swapTotal: 0,
-    diskTotal: 0,
-    bootTime: 0,
-  };
-}
-
-function sanitizePublicMetrics(m: Metrics | null | undefined): Metrics {
-  const n = (v: unknown) => (Number.isFinite(Number(v)) ? Number(v) : 0);
-  return {
-    uptime: 0,
-    cpuUsage: n(m?.cpuUsage),
-    memUsed: 0,
-    memPercent: n(m?.memPercent),
-    swapUsed: 0,
-    diskUsed: 0,
-    diskPercent: n(m?.diskPercent),
-    diskReadBytes: 0,
-    diskWriteBytes: 0,
-    diskReadSpeed: 0,
-    diskWriteSpeed: 0,
-    netSent: 0,
-    netRecv: 0,
-    netUpSpeed: n(m?.netUpSpeed),
-    netDownSpeed: n(m?.netDownSpeed),
-    load1: 0,
-    load5: 0,
-    load15: 0,
-    tcpConns: 0,
-    procs: 0,
-  };
-}
-
+// Strip ONLY the fields the operator wants hidden from guests: the public IP,
+// the latency probe topology (admin-only routes already enforce that), and
+// the internal hostname id (replaced by the opaque url id). Everything else
+// — host facts (CPU model, memory total, uptime, boot time) and live metrics
+// (load, totals, speeds) — passes through unchanged so the public dashboard
+// looks the same as the admin view minus IP + latency.
 export function publicNodes(nodes: NodeView[]): NodeView[] {
   return nodes.map(
     (n) =>
       ({
-        id: n.opaqueId, // hide internal hostname id from guests
+        id: n.opaqueId, // hide internal hostname id from guests (URL identity)
         opaqueId: n.opaqueId,
         name: n.name,
-        host: sanitizePublicHost(n.host),
-        metrics: sanitizePublicMetrics(n.metrics),
+        host: n.host,
+        metrics: n.metrics,
         lastSeen: n.lastSeen,
         online: n.online,
         ip: null,
