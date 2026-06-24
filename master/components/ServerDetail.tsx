@@ -61,7 +61,10 @@ export default function ServerDetail({
   const [points, setPoints] = useState<HistoryPoint[]>([]);
   const [range, setRange] = useState<RangeKey>("realtime");
   const [tab, setTab] = useState<Tab>("detail");
-  const [now, setNow] = useState<number>(initial?.lastSeen ?? 0);
+  // Start at 0 so SSR and first client render agree (datetime() formats in
+  // local TZ — any non-zero seed renders different HH:MM:SS on the UTC server
+  // vs the user's browser, tripping React #418 hydration mismatch).
+  const [now, setNow] = useState<number>(0);
   const [error, setError] = useState<string | null>(dbError);
   const [loadingHist, setLoadingHist] = useState(true);
 
@@ -341,10 +344,12 @@ export default function ServerDetail({
             <Field label={t("totalUp")}>{ibytes(m.netSent)}</Field>
             <Field label={t("totalDown")}>{ibytes(m.netRecv)}</Field>
             <Field label={t("bootTime")} className="col-span-2 lg:col-span-1">
-              {host.bootTime ? datetime(host.bootTime * 1000) : "—"}
+              <span suppressHydrationWarning>
+                {host.bootTime ? datetime(host.bootTime * 1000) : "—"}
+              </span>
             </Field>
             <Field label={t("lastReport")} className="col-span-2">
-              {datetime(node.lastSeen)}
+              <span suppressHydrationWarning>{datetime(node.lastSeen)}</span>
             </Field>
           </dl>
         </div>

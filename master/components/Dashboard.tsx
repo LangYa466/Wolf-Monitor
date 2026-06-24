@@ -41,7 +41,11 @@ export default function Dashboard({
   const [view, setView] = useState<ViewMode>("grid");
   const [region, setRegion] = useState<Region>("all");
   const [status, setStatus] = useState<StatusFilter>("all");
-  const [now, setNow] = useState<number>(() => initial.length ? initial[0].lastSeen : 0);
+  // Start at 0 (renders "—") so SSR and first client render agree on the
+  // clock display. datetime() uses local timezone (getHours/etc) so any non-
+  // zero seed would diverge between UTC server and the user's browser TZ,
+  // tripping React #418 hydration mismatch.
+  const [now, setNow] = useState<number>(0);
 
   // Live updates + 1s clock tick.
   useEffect(() => {
