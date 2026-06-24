@@ -6,7 +6,7 @@ import {
   scryptSync,
 } from "crypto";
 import type { HostInfo, Metrics, NodeView, Report } from "./types";
-import { encodeNodeId } from "./opaqueid";
+import { decodeNodeId, encodeNodeId } from "./opaqueid";
 
 // A node is considered offline if no report arrived within this window.
 export const OFFLINE_AFTER_MS = 15_000;
@@ -805,12 +805,34 @@ export interface HistoryPoint {
   swapUsed: number;
 }
 
+// Public callers (guests on a public dashboard) receive the opaque (encrypted)
+// id rather than the internal hostname, so the history route can't query
+// `metrics_history WHERE node_id = $1` directly. Decode opaque → hostname
+// first so the same callsite works for admins (passing hostname) and guests
+// (passing opaque) without leaking the hostname back through the API.
+export async function resolveInternalNodeId(idOrOpaque: string): Promise<string | null> {
+  await ensureSchema();
+  // Opaque ids are decimal-only (Feistel over base-10); a hostname always
+  // contains a non-digit. This avoids a needless DB round-trip on the common
+  // admin path.
+  if (!/^\d{1,10}$/.test(idOrOpaque)) return idOrOpaque;
+  const seq = await decodeNodeId(idOrOpaque);
+  if (seq == null) return null;
+  const { rows } = await getPool().query<{ id: string }>(
+    `SELECT id FROM nodes WHERE seq = $1 LIMIT 1`,
+    [seq],
+  );
+  return rows[0]?.id ?? null;
+}
+
 export async function getHistory(
-  nodeId: string,
+  idOrOpaque: string,
   limit = 120,
   sinceMs?: number
 ): Promise<HistoryPoint[]> {
   await ensureSchema();
+  const nodeId = await resolveInternalNodeId(idOrOpaque);
+  if (!nodeId) return [];
   const params: (string | number)[] = [nodeId];
   let where = `node_id = $1`;
   if (sinceMs && sinceMs > 0) {
