@@ -69,9 +69,17 @@ function sanitizeMetrics(m: any, host: any): Report["metrics"] | null {
     Math.min(hi, Math.max(lo, v));
   const SAFE = Number.MAX_SAFE_INTEGER;
   const pctKeys = ["cpuUsage", "memPercent", "diskPercent"] as const;
+  // Counters / gauges accepted with [0, SAFE] clamp. Includes cumulative
+  // totals (uptime, netSent/Recv, diskUsed, diskReadBytes, diskWriteBytes)
+  // and instantaneous values that were missing from the v1.5.6 allowlist —
+  // their absence here was zeroing the dashboard's uptime/load/totals
+  // columns even though the node binary reported them correctly.
   const cntKeys = [
     "netUpSpeed", "netDownSpeed", "diskReadSpeed", "diskWriteSpeed",
     "procs", "tcpConns", "memUsed", "swapUsed",
+    "uptime", "netSent", "netRecv",
+    "diskUsed", "diskReadBytes", "diskWriteBytes",
+    "load1", "load5", "load15",
   ] as const;
   const out: any = {};
   for (const k of pctKeys) {
@@ -85,8 +93,10 @@ function sanitizeMetrics(m: any, host: any): Report["metrics"] | null {
   }
   out.procs = Math.trunc(out.procs);
   out.tcpConns = Math.trunc(out.tcpConns);
+  out.uptime = Math.trunc(out.uptime);
   if (isNonNegFinite(host?.memTotal)) out.memUsed = clamp(out.memUsed, 0, host.memTotal);
   if (isNonNegFinite(host?.swapTotal)) out.swapUsed = clamp(out.swapUsed, 0, host.swapTotal);
+  if (isNonNegFinite(host?.diskTotal)) out.diskUsed = clamp(out.diskUsed, 0, host.diskTotal);
   return out;
 }
 
