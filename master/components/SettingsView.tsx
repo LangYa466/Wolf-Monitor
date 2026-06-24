@@ -130,12 +130,12 @@ export default function SettingsView() {
   // and back/forward-aware. Falls back to localStorage (legacy storage) then
   // to "servers" on first visit.
   const urlTab = searchParams.get("tab") as SettingsTab | null;
+  // Tab resolution must NOT read localStorage during render — that diverges
+  // between SSR ("servers") and the client (whatever's stored), which trips
+  // React #418 hydration mismatch. The legacy-storage migration runs from the
+  // useEffect below and pushes the saved tab into the URL on mount.
   const tab: SettingsTab =
-    urlTab && TABS.some((x) => x.value === urlTab)
-      ? urlTab
-      : (typeof window !== "undefined"
-          ? (localStorage.getItem(TAB_KEY) as SettingsTab | null)
-          : null) ?? "servers";
+    urlTab && TABS.some((x) => x.value === urlTab) ? urlTab : "servers";
 
   const refreshNodes = useCallback(() => {
     fetch("/api/nodes")
@@ -397,8 +397,15 @@ function ServersSection({
     }
   }
 
-  const origin = typeof window !== "undefined" ? window.location.host : "your-master";
-  const proto = typeof window !== "undefined" && window.location.protocol === "https:" ? "wss" : "ws";
+  // Resolved in useEffect after mount so SSR and first client render agree
+  // on the placeholders (prevents React #418 hydration mismatch in the
+  // install-command snippet).
+  const [origin, setOrigin] = useState<string>("your-master");
+  const [proto, setProto] = useState<"ws" | "wss">("ws");
+  useEffect(() => {
+    setOrigin(window.location.host);
+    setProto(window.location.protocol === "https:" ? "wss" : "ws");
+  }, []);
   // http(s) base for install commands. HTTP transport works whether the master
   // sits behind a WebSocket-capable proxy or not, so it's the safe default.
   const base = `${proto === "wss" ? "https" : "http"}://${origin}`;
