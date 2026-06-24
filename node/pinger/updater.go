@@ -72,14 +72,20 @@ func (r *Runner) maybeSelfUpdate(desired string) {
 	// this process. If we're still here, the install failed — keep serving.
 }
 
-// runInstallScript pipes the install.sh from raw.githubusercontent into bash
-// with the same -e/-t the node was started with, plus -V <version> to pin
-// the target binary. The script handles SHA256SUMS verify, service stop,
-// atomic binary replace, and systemctl start.
+// runInstallScript launches install.sh in a DETACHED systemd transient unit
+// so that install.sh's first move — `systemctl stop wolf-node` — doesn't
+// also kill the helper process itself (we'd be running inside the same
+// cgroup otherwise, and the SIGTERM cascade leaves the binary unreplaced).
+//
+// `systemd-run --collect --no-block` spawns the helper as a fire-and-forget
+// transient .service unit; --collect tells systemd to garbage-collect it
+// after it exits so we don't leak units. The original wolf-node service is
+// then stopped by install.sh, the binary swapped, and the service restarted
+// — at which point this updater code is already gone (different process).
+//
+// Inputs flow through systemd-run's argv (-- ... ARG ARG) and bash's $1/$2/$3,
+// so a token like `; rm -rf /` stays a literal positional arg the whole way.
 func runInstallScript(master, token, version string) error {
-	// Belt-and-suspenders: never let any input flow into the shell unquoted.
-	// -e <master> and -t <token> go through bash's positional argv ($1/$2/$3)
-	// so even a token like "; rm -rf /" stays a single literal arg.
 	const script = `set -e
 url="https://raw.githubusercontent.com/LangYa466/Wolf-Monitor/main/node/install.sh"
 if command -v curl >/dev/null 2>&1; then
@@ -87,9 +93,28 @@ if command -v curl >/dev/null 2>&1; then
 else
   bash <(wget -qO- --timeout=60 "$url") -e "$1" -t "$2" -V "$3"
 fi`
+	// Try systemd-run first (always present on a systemd host). Falls back
+	// to plain setsid for non-systemd setups even though install.sh wouldn't
+	// work there — at least the helper survives the wolf-node SIGTERM.
+	if path, err := exec.LookPath("systemd-run"); err == nil {
+		cmd := exec.Command(path,
+			"--collect", "--no-block",
+			"--unit", "wolf-node-update",
+			"--description", "wolf-node self-update",
+			"bash", "-c", script, "wolf-update", master, token, version,
+		)
+		cmd.Stdout = log.Writer()
+		cmd.Stderr = log.Writer()
+		return cmd.Run()
+	}
+	if path, err := exec.LookPath("setsid"); err == nil {
+		cmd := exec.Command(path, "bash", "-c", script, "wolf-update", master, token, version)
+		cmd.Stdout = log.Writer()
+		cmd.Stderr = log.Writer()
+		return cmd.Start()
+	}
+	// Last resort — runs in our cgroup, may be killed mid-replace.
 	cmd := exec.Command("bash", "-c", script, "wolf-update", master, token, version)
-	// install.sh is fully self-contained; we don't need its stdout, but we
-	// surface stderr so a failed update shows up in `journalctl -u wolf-node`.
 	cmd.Stdout = log.Writer()
 	cmd.Stderr = log.Writer()
 	return cmd.Run()
