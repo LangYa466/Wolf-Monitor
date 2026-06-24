@@ -38,6 +38,7 @@ func main() {
 	defer rep.Close()
 
 	col := collector.New()
+	col.SetAgentVersion(Version)
 	hostInfo := col.Host()
 	log.Printf("host: %s (%s/%s) cores=%d mem=%dMB",
 		hostInfo.Hostname, hostInfo.OS, hostInfo.KernelArch, hostInfo.CPUCores, hostInfo.MemTotal/1024/1024)

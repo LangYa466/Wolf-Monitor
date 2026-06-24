@@ -23,6 +23,9 @@ type HostInfo struct {
 	SwapTotal    uint64 `json:"swapTotal"`
 	DiskTotal    uint64 `json:"diskTotal"`
 	BootTime     uint64 `json:"bootTime"` // unix seconds
+	// AgentVersion is the build version of this binary, reported up so the
+	// master can show version drift and route the self-update directive.
+	AgentVersion string `json:"agentVersion"`
 }
 
 // Metrics is the live, fast-changing sample.

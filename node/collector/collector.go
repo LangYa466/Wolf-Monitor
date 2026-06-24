@@ -23,9 +23,15 @@ type Collector struct {
 	lastNetSent   uint64
 	lastNetRecv   uint64
 
-	cpuModel string
-	cpuCores int
+	cpuModel     string
+	cpuCores     int
+	agentVersion string
 }
+
+// SetAgentVersion stamps the binary's build version onto every Host() snapshot
+// so the master can show fleet-wide version drift and decide whether to push
+// a self-update directive.
+func (c *Collector) SetAgentVersion(v string) { c.agentVersion = v }
 
 func New() *Collector {
 	c := &Collector{}
@@ -41,9 +47,10 @@ func New() *Collector {
 // Host returns the slow-changing machine information.
 func (c *Collector) Host() HostInfo {
 	hi := HostInfo{
-		OS:       "unknown",
-		CPUModel: c.cpuModel,
-		CPUCores: c.cpuCores,
+		OS:           "unknown",
+		CPUModel:     c.cpuModel,
+		CPUCores:     c.cpuCores,
+		AgentVersion: c.agentVersion,
 	}
 
 	if info, err := host.Info(); err == nil {
