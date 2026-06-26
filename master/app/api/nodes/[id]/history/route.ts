@@ -49,13 +49,22 @@ export async function GET(
     isGuest ? 240 : 2000
   );
   // Clamp window to pruneHistory retention (30d) so guests/admins can't ask
-  // the planner for nonsense values; guests are further capped to 24h.
+  // the planner for nonsense values. Guests are additionally capped to 24h —
+  // reject (not silently clamp) anything bigger so the front-end lock and the
+  // back-end gate agree, and so a probe hitting the API directly with
+  // ?window=7d doesn't quietly receive 1d back as if the request succeeded.
   const MAX_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
   const GUEST_WINDOW_MS = 24 * 60 * 60 * 1000;
   const rawWindow = Math.max(Number(sp.get("window") ?? 0) || 0, 0);
+  if (isGuest && rawWindow > GUEST_WINDOW_MS) {
+    return NextResponse.json(
+      { error: "guest window exceeds limit", maxWindowMs: GUEST_WINDOW_MS },
+      { status: 403 },
+    );
+  }
   const windowMs = Math.min(
     rawWindow || (isGuest ? GUEST_WINDOW_MS : MAX_WINDOW_MS),
-    isGuest ? GUEST_WINDOW_MS : MAX_WINDOW_MS
+    isGuest ? GUEST_WINDOW_MS : MAX_WINDOW_MS,
   );
   const sinceMs = Date.now() - windowMs;
 
