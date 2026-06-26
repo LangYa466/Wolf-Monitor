@@ -50,7 +50,7 @@ import { GripVertical, Trash2, RotateCw, Check, Minus, AlertTriangle, Terminal, 
 // Pinned to a release tag (not `main`) so a malicious push to main can't
 // rewrite the install script every existing operator pastes onto new boxes.
 // Bump on release. CWE-494.
-const INSTALL_REF = "v1.5.5";
+const INSTALL_REF = "v1.6.0";
 // Strict https://host[:port] proxy regex. Anything else (http://, paths,
 // query strings, embedded creds, IDN tricks) is rejected before we splice
 // it into a `wget | sudo bash` snippet.
