@@ -187,6 +187,11 @@ CREATE INDEX IF NOT EXISTS auth_attempts_scope_ts ON auth_attempts (scope, ts DE
 ALTER TABLE nodes ADD COLUMN IF NOT EXISTS ip TEXT;
 ALTER TABLE nodes ADD COLUMN IF NOT EXISTS country TEXT;
 ALTER TABLE nodes ADD COLUMN IF NOT EXISTS sort_order INTEGER NOT NULL DEFAULT 1000000;
+-- Admin-pinned country override. When TRUE, /api/report keeps the existing
+-- country value instead of overwriting it from ipinfo. Lets operators force a
+-- flag for nodes behind CGNAT / overlay networks where the WAN egress IP
+-- doesn't match the box's actual location.
+ALTER TABLE nodes ADD COLUMN IF NOT EXISTS country_manual BOOLEAN NOT NULL DEFAULT FALSE;
 
 -- Extra history series for the per-server detail charts (process count,
 -- TCP connections, absolute memory/swap usage). Added after initial release.
@@ -562,7 +567,8 @@ export async function saveReport(
            last_seen = EXCLUDED.last_seen,
            updated_at = now(),
            ip = COALESCE($5, nodes.ip),
-           country = COALESCE($6, nodes.country)
+           country = CASE WHEN nodes.country_manual THEN nodes.country
+                          ELSE COALESCE($6, nodes.country) END
      RETURNING sort_order, country, ip, seq, name`,
     [id, hostJson, metricsJson, now, ip, country]
   );
@@ -706,16 +712,43 @@ export async function setNodeName(id: string, name: string): Promise<void> {
 }
 
 // getNodeNet returns a node's stored ip/country (or null if unknown), so the
-// caller can decide whether a geo lookup is needed.
+// caller can decide whether a geo lookup is needed. `countryManual` lets the
+// caller skip the lookup entirely when an admin has pinned the flag.
 export async function getNodeNet(
   id: string
-): Promise<{ ip: string | null; country: string | null } | null> {
+): Promise<{ ip: string | null; country: string | null; countryManual: boolean } | null> {
   await ensureSchema();
-  const { rows } = await getPool().query<{ ip: string | null; country: string | null }>(
-    `SELECT ip, country FROM nodes WHERE id = $1`,
+  const { rows } = await getPool().query<{
+    ip: string | null;
+    country: string | null;
+    country_manual: boolean;
+  }>(
+    `SELECT ip, country, country_manual FROM nodes WHERE id = $1`,
     [id]
   );
-  return rows.length ? { ip: rows[0].ip, country: rows[0].country } : null;
+  return rows.length
+    ? { ip: rows[0].ip, country: rows[0].country, countryManual: rows[0].country_manual }
+    : null;
+}
+
+// setNodeCountry pins (or clears) a node's country flag. Passing null clears
+// the override and lets the next report re-resolve via ipinfo.
+export async function setNodeCountry(
+  id: string,
+  code: string | null
+): Promise<void> {
+  await ensureSchema();
+  if (code === null) {
+    await getPool().query(
+      `UPDATE nodes SET country = NULL, country_manual = FALSE WHERE id = $1`,
+      [id],
+    );
+    return;
+  }
+  await getPool().query(
+    `UPDATE nodes SET country = $1, country_manual = TRUE WHERE id = $2`,
+    [code.toUpperCase(), id],
+  );
 }
 
 // Hard cap on reorder payload — protects the single pooled DB connection

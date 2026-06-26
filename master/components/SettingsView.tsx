@@ -38,7 +38,7 @@ import {
 import { flagUrl } from "@/lib/format";
 import { useI18n } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
-import { GripVertical, Trash2, RotateCw, Check, Minus, AlertTriangle, Terminal, Pencil } from "lucide-react";
+import { GripVertical, Trash2, RotateCw, Check, Minus, AlertTriangle, Terminal, Pencil, Flag } from "lucide-react";
 
 // Install commands for a node (identical for every server — the node reports
 // its own hostname; reinstalling just re-runs the same token-based command).
@@ -225,6 +225,92 @@ const TABS: { value: SettingsTab; key: string }[] = [
 ];
 
 // ── Servers: token, ipinfo, drag reorder ────────────────────────────────────
+
+// FlagEditor: click the flag (or 🌐 placeholder) to edit the ISO 3166-1
+// alpha-2 country code. Empty input clears the override and re-enables the
+// next ipinfo lookup. Used in the drag-reorder list so admins can pin a flag
+// for nodes behind CGNAT / VPN egress where the WAN IP doesn't match.
+function FlagEditor({
+  nodeId,
+  country,
+  onSaved,
+  onFailed,
+}: {
+  nodeId: string;
+  country: string | null;
+  onSaved: () => void;
+  onFailed: () => void;
+}) {
+  const { t } = useI18n();
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(country ?? "");
+
+  useEffect(() => {
+    if (!editing) setDraft(country ?? "");
+  }, [country, editing]);
+
+  async function commit() {
+    const raw = draft.trim().toLowerCase();
+    setEditing(false);
+    // Either a 2-letter code or empty (= clear override). Anything else is
+    // rejected client-side so we never POST garbage; server re-validates.
+    if (raw !== "" && !/^[a-z]{2}$/.test(raw)) {
+      setDraft(country ?? "");
+      onFailed();
+      return;
+    }
+    if (raw === (country ?? "")) return;
+    const res = await api(`/api/nodes/${encodeURIComponent(nodeId)}`, "PATCH", {
+      country: raw === "" ? null : raw,
+    });
+    if (res.ok) onSaved();
+    else onFailed();
+  }
+
+  if (editing) {
+    return (
+      <Input
+        autoFocus
+        value={draft}
+        onChange={(e) => setDraft(e.target.value.slice(0, 2))}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") e.currentTarget.blur();
+          else if (e.key === "Escape") {
+            setDraft(country ?? "");
+            setEditing(false);
+          }
+        }}
+        placeholder={t("countryAuto")}
+        title={t("countryOverrideHint")}
+        className="h-7 w-12 shrink-0 px-1.5 text-center font-mono uppercase"
+      />
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={() => setEditing(true)}
+      title={t("countryOverrideHint")}
+      aria-label={t("countryOverride")}
+      className="inline-flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-secondary/60 hover:text-foreground"
+    >
+      {country ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={flagUrl(country)}
+          alt={country}
+          width={18}
+          height={13}
+          className="rounded-[2px]"
+        />
+      ) : (
+        <Flag className="size-4" />
+      )}
+    </button>
+  );
+}
 
 function ServersSection({
   nodes,
@@ -553,13 +639,27 @@ function ServersSection({
           <p className="mt-1 text-xs text-muted-foreground">{t("agentVersionHint")}</p>
           {Object.keys(nodeAgentVersions).length > 0 && (
             <div className="mt-2 grid grid-cols-1 gap-1 text-xs sm:grid-cols-2">
-              {Object.entries(nodeAgentVersions).map(([host, ver]) => {
+              {Object.entries(nodeAgentVersions).map(([id, ver]) => {
                 const target = (desiredAgentVersion || "").replace(/^v/, "");
                 const cur = (ver || "").replace(/^v/, "");
                 const drift = target && cur && target !== cur;
+                // Prefer the admin-set alias; fall back to hostname; finally
+                // the raw id so offline nodes still surface even when the
+                // /api/nodes list and the agent-version map drift apart.
+                const node = nodes.find((n) => n.id === id);
+                const label = (node?.name || node?.host?.hostname || id) ?? id;
                 return (
-                  <div key={host} className="flex justify-between gap-2 truncate">
-                    <span className="truncate text-muted-foreground">{host}</span>
+                  <div key={id} className="flex items-center justify-between gap-2 truncate">
+                    <span className="flex items-center gap-1.5 truncate text-muted-foreground">
+                      <span
+                        className={cn(
+                          "size-1.5 shrink-0 rounded-full",
+                          node?.online ? "bg-success" : "bg-destructive",
+                        )}
+                        aria-label={node?.online ? "online" : "offline"}
+                      />
+                      <span className="truncate">{label}</span>
+                    </span>
                     <span className={drift ? "text-warning" : "text-foreground tabular-nums"}>
                       {ver || "—"}
                     </span>
@@ -590,10 +690,15 @@ function ServersSection({
                   >
                     <GripVertical className="size-4" />
                   </span>
-                  {n.country && (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img src={flagUrl(n.country)} alt={n.country} width={18} height={13} className="shrink-0 rounded-[2px]" />
-                  )}
+                  <FlagEditor
+                    nodeId={n.id}
+                    country={n.country}
+                    onSaved={() => {
+                      setMsg(t("msgSaved"));
+                      onNodesChange();
+                    }}
+                    onFailed={() => setMsg(t("msgFailed"))}
+                  />
                   <Input
                     value={names[n.id] ?? ""}
                     placeholder={n.host.hostname}

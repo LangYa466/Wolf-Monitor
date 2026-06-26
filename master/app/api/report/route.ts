@@ -146,7 +146,12 @@ export async function POST(req: NextRequest) {
     const ip = clientIp(req.headers);
     const existing = await getNodeNet(body.host.hostname);
     let country: string | null | undefined;
-    if (shouldResolve(ip, existing?.ip ?? null, existing?.country ?? null)) {
+    // Admin-pinned country: never overwrite from ipinfo. saveReport's SQL also
+    // guards this; we short-circuit here to avoid a wasted network round trip.
+    if (
+      !existing?.countryManual &&
+      shouldResolve(ip, existing?.ip ?? null, existing?.country ?? null)
+    ) {
       country = await resolveCountry(ip);
     }
     const node = await saveReport(body, { ip, country });
