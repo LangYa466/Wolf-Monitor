@@ -18,7 +18,7 @@ import type { PingTask } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { BandwidthChart, MetricChart } from "@/components/Charts";
 import { useI18n } from "@/lib/i18n";
-import { ChevronLeft, ArrowUp, ArrowDown, LayoutDashboard, Radar, AlertTriangle, Clock } from "lucide-react";
+import { ChevronLeft, ArrowUp, ArrowDown, LayoutDashboard, Radar, AlertTriangle, Clock, Lock } from "lucide-react";
 import { SegmentedControl } from "@/components/ui/segmented";
 import { SelectMenu } from "@/components/ui/select-menu";
 import type { HostInfo } from "@/lib/types";
@@ -42,6 +42,12 @@ const RANGES: { key: RangeKey; label: string; windowMs: number; xLabel: string }
   { key: "7d", label: "7 Day", windowMs: 7 * 24 * 3600_000, xLabel: "7d" },
   { key: "30d", label: "30 Day", windowMs: 30 * 24 * 3600_000, xLabel: "30d" },
 ];
+
+// Guests are capped at 24h by /api/nodes/:id/history (GUEST_WINDOW_MS). Ranges
+// beyond that would round-trip the request just to receive 1d back, so we lock
+// them in the picker and surface "guest cannot view" instead of silently
+// truncating the chart.
+const GUEST_MAX_WINDOW_MS = 24 * 3600_000;
 
 type Tab = "detail" | "network";
 
@@ -382,7 +388,19 @@ export default function ServerDetail({
           value={range}
           onChange={setRange}
           leading={<Clock className="text-muted-foreground" />}
-          options={RANGES.map((r) => ({ value: r.key, label: r.label }))}
+          options={RANGES.map((r) => {
+            const locked = isPublic && r.windowMs > GUEST_MAX_WINDOW_MS;
+            return {
+              value: r.key,
+              label: locked ? (
+                <span title={t("guestLocked")}>{r.label}</span>
+              ) : (
+                r.label
+              ),
+              disabled: locked,
+              trailing: locked ? <Lock /> : undefined,
+            };
+          })}
         />
       </div>
 

@@ -8,7 +8,18 @@ import { ChevronDown, Check } from "lucide-react";
 // trigger and a card-styled popover menu that scales/fades in. Replaces the
 // unstyled native <select>.
 
-export type SelectOption<T extends string> = { value: T; label: React.ReactNode };
+export type SelectOption<T extends string> = {
+  value: T;
+  label: React.ReactNode;
+  // When true, the option renders muted and click is a no-op. Used by callers
+  // that want to expose a choice in the menu (so the user sees it exists) but
+  // gate access — e.g. ranges only available to logged-in admins.
+  disabled?: boolean;
+  // Optional adornment rendered right-aligned next to the label (e.g. a lock
+  // icon for disabled options). Suppressed for the active row, which shows
+  // a check instead.
+  trailing?: React.ReactNode;
+};
 
 export function SelectMenu<T extends string>({
   value,
@@ -93,19 +104,25 @@ export function SelectMenu<T extends string>({
               type="button"
               role="option"
               aria-selected={active}
+              aria-disabled={o.disabled || undefined}
+              disabled={o.disabled}
+              title={typeof o.label === "string" && o.disabled ? undefined : undefined}
               onClick={() => {
+                if (o.disabled) return;
                 onChange(o.value);
                 setOpen(false);
               }}
               className={cn(
                 "flex w-full items-center justify-between gap-4 whitespace-nowrap rounded px-2.5 py-1.5 text-sm transition-colors [&_svg]:size-3.5",
-                active
-                  ? "bg-secondary text-foreground"
-                  : "text-muted-foreground hover:bg-secondary/60 hover:text-foreground",
+                o.disabled
+                  ? "cursor-not-allowed text-muted-foreground/60"
+                  : active
+                    ? "bg-secondary text-foreground"
+                    : "text-muted-foreground hover:bg-secondary/60 hover:text-foreground",
               )}
             >
               <span>{o.label}</span>
-              {active && <Check />}
+              {active ? <Check /> : o.trailing}
             </button>
           );
         })}

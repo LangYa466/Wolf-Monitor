@@ -87,6 +87,7 @@ const zhHant: Dict = {
   // detail tabs / charts
   tabDetail: "詳細資訊",
   tabNetwork: "網路",
+  guestLocked: "訪客不可查看",
   chProcesses: "進程數",
   chDisk: "磁盤",
   chMemSwap: "內存 / Swap",
@@ -287,6 +288,7 @@ const en: Dict = {
 
   tabDetail: "Details",
   tabNetwork: "Network",
+  guestLocked: "Guests can't view this range",
   chProcesses: "Processes",
   chDisk: "Disk",
   chMemSwap: "Memory / Swap",
