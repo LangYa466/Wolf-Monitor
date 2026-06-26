@@ -331,37 +331,85 @@ export async function latencyHistoryForNode(
   if (activeTasks.length === 0) return {};
   const taskIds = activeTasks.map((t) => t.id);
 
-  const params: (string | number | string[])[] = [nodeId, taskIds, limitPerTask];
-  let timeFilter = "";
-  if (sinceMs && sinceMs > 0) {
-    params.push(sinceMs);
-    timeFilter = ` AND ts >= $${params.length}`;
+  // No window → return the most-recent `limitPerTask` raw samples per task.
+  // With a window we bucket-AVG just like getHistory(): otherwise 7d/30d
+  // picks would truncate to the latest N raw rows and cover only a fraction
+  // of the asked-for window (see master/lib/db.ts:getHistory).
+  if (!sinceMs || sinceMs <= 0) {
+    const { rows } = await getPool().query<{
+      task_id: string;
+      ts: string;
+      latency_ms: number;
+      success: boolean;
+    }>(
+      `WITH ranked AS (
+         SELECT task_id, ts, latency_ms, success,
+                ROW_NUMBER() OVER (PARTITION BY task_id ORDER BY ts DESC) AS rn
+           FROM ping_results
+          WHERE node_id = $1
+            AND task_id = ANY($2::text[])
+       )
+       SELECT task_id, ts, latency_ms, success
+         FROM ranked
+        WHERE rn <= $3
+        ORDER BY task_id, ts ASC`,
+      [nodeId, taskIds, limitPerTask],
+    );
+    const out: Record<string, { ts: number; latencyMs: number; success: boolean }[]> = {};
+    for (const r of rows) {
+      (out[r.task_id] ??= []).push({
+        ts: Number(r.ts),
+        latencyMs: r.latency_ms,
+        success: r.success,
+      });
+    }
+    return out;
   }
+
+  // Bucket so every chart pixel maps to a real time slice. AVG keeps the
+  // shape of the latency curve; BOOL_AND flags a bucket as success only when
+  // every sample in it succeeded — a single failure inside the bucket still
+  // surfaces as a failure marker, which is what an operator scanning for
+  // outages wants.
+  const windowMs = Math.max(1, Date.now() - sinceMs);
+  const HISTORY_MIN_INTERVAL_MS = 5_000;
+  const bucketMs = Math.max(
+    HISTORY_MIN_INTERVAL_MS,
+    Math.ceil(windowMs / Math.max(1, limitPerTask)),
+  );
+
   const { rows } = await getPool().query<{
     task_id: string;
-    ts: string;
+    bucket_ts: string;
     latency_ms: number;
     success: boolean;
   }>(
-    `WITH ranked AS (
-       SELECT task_id, ts, latency_ms, success,
-              ROW_NUMBER() OVER (PARTITION BY task_id ORDER BY ts DESC) AS rn
+    `WITH bucketed AS (
+       SELECT task_id,
+              (ts / $4)::bigint * $4 AS bucket_ts,
+              AVG(latency_ms)::float8 AS latency_ms,
+              BOOL_AND(success)       AS success
          FROM ping_results
         WHERE node_id = $1
           AND task_id = ANY($2::text[])
-          ${timeFilter}
+          AND ts >= $5
+        GROUP BY task_id, bucket_ts
+     ),
+     ranked AS (
+       SELECT task_id, bucket_ts, latency_ms, success,
+              ROW_NUMBER() OVER (PARTITION BY task_id ORDER BY bucket_ts DESC) AS rn
+         FROM bucketed
      )
-     SELECT task_id, ts, latency_ms, success
+     SELECT task_id, bucket_ts, latency_ms, success
        FROM ranked
       WHERE rn <= $3
-      ORDER BY task_id, ts ASC`,
-    params,
+      ORDER BY task_id, bucket_ts ASC`,
+    [nodeId, taskIds, limitPerTask, bucketMs, sinceMs],
   );
   const out: Record<string, { ts: number; latencyMs: number; success: boolean }[]> = {};
   for (const r of rows) {
-    const key = r.task_id;
-    (out[key] ??= []).push({
-      ts: Number(r.ts),
+    (out[r.task_id] ??= []).push({
+      ts: Number(r.bucket_ts),
       latencyMs: r.latency_ms,
       success: r.success,
     });
