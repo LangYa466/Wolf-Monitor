@@ -817,38 +817,83 @@ export async function getHistory(
   await ensureSchema();
   const nodeId = await resolveInternalNodeId(idOrOpaque);
   if (!nodeId) return [];
-  const params: (string | number)[] = [nodeId];
-  let where = `node_id = $1`;
-  if (sinceMs && sinceMs > 0) {
-    params.push(sinceMs);
-    where += ` AND ts >= $${params.length}`;
+
+  // Sample rows land in metrics_history every HISTORY_MIN_INTERVAL_MS (5s).
+  // Over a 7-day window that's up to 120k rows, and a naive `ORDER BY ts DESC
+  // LIMIT $limit` would silently truncate to the most recent ~3 hours, so the
+  // 7d/30d picks would draw a few hours of data under a "7d" axis label. When
+  // the caller passes a sinceMs we bucket-AVG by `(now-sinceMs)/limit` ms so
+  // each chart pixel corresponds to a real time slice instead of a head-truncated
+  // tail. For realtime (no sinceMs) we keep the raw LIMIT path — the chart wants
+  // the last N samples verbatim.
+  const noWindow = !sinceMs || sinceMs <= 0;
+  if (noWindow) {
+    const { rows } = await getPool().query(
+      `SELECT ts, cpu, mem_pct, disk_pct, net_up, net_down, disk_r, disk_w,
+              procs, tcp, mem_used, swap_used
+         FROM metrics_history
+        WHERE node_id = $1
+        ORDER BY ts DESC
+        LIMIT $2`,
+      [nodeId, limit],
+    );
+    return rows
+      .map((r) => ({
+        ts: Number(r.ts),
+        cpu: r.cpu,
+        memPct: r.mem_pct,
+        diskPct: r.disk_pct,
+        netUp: Number(r.net_up),
+        netDown: Number(r.net_down),
+        diskR: Number(r.disk_r),
+        diskW: Number(r.disk_w),
+        procs: Number(r.procs),
+        tcp: Number(r.tcp),
+        memUsed: Number(r.mem_used),
+        swapUsed: Number(r.swap_used),
+      }))
+      .reverse();
   }
-  params.push(limit);
+
+  // Bucket size in ms; never smaller than the per-row write interval so we
+  // don't ask Postgres to GROUP BY a column with one row per bucket.
+  const windowMs = Math.max(1, Date.now() - sinceMs);
+  const bucketMs = Math.max(HISTORY_MIN_INTERVAL_MS, Math.ceil(windowMs / Math.max(1, limit)));
+
   const { rows } = await getPool().query(
-    `SELECT ts, cpu, mem_pct, disk_pct, net_up, net_down, disk_r, disk_w,
-            procs, tcp, mem_used, swap_used
+    `SELECT (ts / $3)::bigint * $3 AS bucket_ts,
+            AVG(cpu)::float8       AS cpu,
+            AVG(mem_pct)::float8   AS mem_pct,
+            AVG(disk_pct)::float8  AS disk_pct,
+            AVG(net_up)::float8    AS net_up,
+            AVG(net_down)::float8  AS net_down,
+            AVG(disk_r)::float8    AS disk_r,
+            AVG(disk_w)::float8    AS disk_w,
+            AVG(procs)::float8     AS procs,
+            AVG(tcp)::float8       AS tcp,
+            AVG(mem_used)::float8  AS mem_used,
+            AVG(swap_used)::float8 AS swap_used
        FROM metrics_history
-      WHERE ${where}
-      ORDER BY ts DESC
-      LIMIT $${params.length}`,
-    params
+      WHERE node_id = $1 AND ts >= $2
+      GROUP BY bucket_ts
+      ORDER BY bucket_ts ASC
+      LIMIT $4`,
+    [nodeId, sinceMs, bucketMs, limit],
   );
-  return rows
-    .map((r) => ({
-      ts: Number(r.ts),
-      cpu: r.cpu,
-      memPct: r.mem_pct,
-      diskPct: r.disk_pct,
-      netUp: Number(r.net_up),
-      netDown: Number(r.net_down),
-      diskR: Number(r.disk_r),
-      diskW: Number(r.disk_w),
-      procs: Number(r.procs),
-      tcp: Number(r.tcp),
-      memUsed: Number(r.mem_used),
-      swapUsed: Number(r.swap_used),
-    }))
-    .reverse(); // chronological for charting
+  return rows.map((r) => ({
+    ts: Number(r.bucket_ts),
+    cpu: r.cpu,
+    memPct: r.mem_pct,
+    diskPct: r.disk_pct,
+    netUp: Number(r.net_up),
+    netDown: Number(r.net_down),
+    diskR: Number(r.disk_r),
+    diskW: Number(r.disk_w),
+    procs: Number(r.procs),
+    tcp: Number(r.tcp),
+    memUsed: Number(r.mem_used),
+    swapUsed: Number(r.swap_used),
+  }));
 }
 
 // pruneHistory trims rows older than the retention window (best-effort).
