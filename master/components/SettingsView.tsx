@@ -59,16 +59,28 @@ function safeProxy(raw: string | undefined): string {
   const v = (raw ?? "").trim().replace(/\/+$/, "");
   return SAFE_PROXY_RE.test(v) ? v : "";
 }
+// Default GitHub mirror auto-applied to install snippets for CN-flagged nodes
+// when no admin-configured proxy is in effect. ghfast.top is the same mirror
+// the "GitHub proxy" setting placeholder hints at — keeping it in lockstep so
+// behavior matches the option's docs. Subject to the same SAFE_PROXY_RE check
+// as user input, so a future typo here can't sneak past the snippet sanitizer.
+const CN_DEFAULT_PROXY = "https://ghfast.top";
+
 function InstallSnippet({
   base,
   tok,
   hostname,
   proxy,
+  autoCnProxy = false,
 }: {
   base: string;
   tok: string;
   hostname?: string;
   proxy?: string;
+  // When true, this snippet is using the CN-auto proxy rather than the
+  // admin-configured one — render a small explainer below so the operator
+  // understands why a third-party mirror URL showed up unprompted.
+  autoCnProxy?: boolean;
 }) {
   const { t } = useI18n();
   const p = safeProxy(proxy);
@@ -94,8 +106,28 @@ function InstallSnippet({
         {`powershell -NoProfile -ExecutionPolicy Bypass -Command "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; iwr '${ps1Full}' -UseBasicParsing -OutFile 'install.ps1'; & '.\\install.ps1' '-e' '${base}' '-t' '${tok}' '-T' 'http'${ps1ProxyArg}"`}
       </code>
       <div className="text-muted-foreground">{t("installWs")}</div>
+      {autoCnProxy && p && (
+        <div className="text-[11px] text-warning">
+          {t("cnAutoProxyHint", { proxy: p })}
+        </div>
+      )}
     </div>
   );
+}
+
+// proxyForNode picks the install-snippet mirror for a given server. Admin's
+// configured proxy always wins; otherwise CN-flagged nodes get the default
+// ghfast mirror so install/self-update doesn't hang on github.com behind the
+// GFW. Returns { proxy, autoCn } so the UI can label the auto path.
+function proxyForNode(
+  country: string | null,
+  configured: string,
+): { proxy: string; autoCn: boolean } {
+  if (configured) return { proxy: configured, autoCn: false };
+  if (country && country.toLowerCase() === "cn") {
+    return { proxy: CN_DEFAULT_PROXY, autoCn: true };
+  }
+  return { proxy: "", autoCn: false };
 }
 
 // Renders a node's on/off state as an icon (no emoji).
@@ -737,27 +769,31 @@ function ServersSection({
                   </button>
                   <span className={`ml-1 h-2 w-2 shrink-0 rounded-full ${n.online ? "bg-success" : "bg-destructive"}`} />
                 </div>
-                {openInstall === n.id && (
-                  <div className="mt-1.5 space-y-1.5">
-                    <InstallSnippet
-                      base={base}
-                      tok={nodeTokens[n.host.hostname] ?? "TOKEN"}
-                      hostname={n.host.hostname}
-                      proxy={activeProxy}
-                    />
-                    <div className="flex items-center justify-end gap-2 text-xs">
-                      <span className="mr-auto text-muted-foreground">{t("nodeTokenHint")}</span>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="[&_svg]:size-3.5"
-                        onClick={() => rotateNodeToken(n.host.hostname)}
-                      >
-                        <RotateCw /> {t("rotate")}
-                      </Button>
+                {openInstall === n.id && (() => {
+                  const picked = proxyForNode(n.country, activeProxy);
+                  return (
+                    <div className="mt-1.5 space-y-1.5">
+                      <InstallSnippet
+                        base={base}
+                        tok={nodeTokens[n.host.hostname] ?? "TOKEN"}
+                        hostname={n.host.hostname}
+                        proxy={picked.proxy}
+                        autoCnProxy={picked.autoCn}
+                      />
+                      <div className="flex items-center justify-end gap-2 text-xs">
+                        <span className="mr-auto text-muted-foreground">{t("nodeTokenHint")}</span>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="[&_svg]:size-3.5"
+                          onClick={() => rotateNodeToken(n.host.hostname)}
+                        >
+                          <RotateCw /> {t("rotate")}
+                        </Button>
+                      </div>
                     </div>
-                  </div>
-                )}
+                  );
+                })()}
               </div>
             ))}
           </div>
