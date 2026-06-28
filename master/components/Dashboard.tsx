@@ -422,6 +422,26 @@ function NetCell({ up, down }: { up: number; down: number }) {
   );
 }
 
+// Cumulative bytes since the agent started — list view only. Grid cards omit
+// it to keep the card from getting wider; users who want to rank by it sort
+// the dashboard via the Total sort modes.
+function TotalCell({ sent, recv }: { sent: number; recv: number }) {
+  const { t } = useI18n();
+  return (
+    <div className="w-[88px] shrink-0 text-center">
+      <div className="text-[10px] uppercase tracking-wide text-muted-foreground">{t("mTotal")}</div>
+      <div className="flex flex-col items-center gap-0 text-[11px] font-semibold leading-tight tabular-nums">
+        <span className="inline-flex items-center gap-0.5">
+          <ArrowUp className="size-2.5 text-primary" /> {ibytes(sent, 1)}
+        </span>
+        <span className="inline-flex items-center gap-0.5">
+          <ArrowDown className="size-2.5 text-success" /> {ibytes(recv, 1)}
+        </span>
+      </div>
+    </div>
+  );
+}
+
 // Grid-view card: one server as a horizontal row of identity + 5 metric cells.
 function ServerRow({ node }: { node: NodeView }) {
   const { t } = useI18n();
@@ -482,6 +502,7 @@ function ServerListRow({ node, first }: { node: NodeView; first: boolean }) {
         <Cell label={t("mMem")} value={pct(m.memPercent)} className={pctColor(m.memPercent)} />
         <Cell label={t("mStorage")} value={pct(m.diskPercent)} className={pctColor(m.diskPercent)} />
         <NetCell up={m.netUpSpeed} down={m.netDownSpeed} />
+        <TotalCell sent={m.netSent} recv={m.netRecv} />
       </div>
     </Link>
   );

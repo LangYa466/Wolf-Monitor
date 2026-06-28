@@ -71,6 +71,7 @@ const zhHant: Dict = {
   mUp: "上傳",
   mDown: "下載",
   mNet: "上下行",
+  mTotal: "累計",
   offline: "離線",
 
   // detail header fields
@@ -279,6 +280,7 @@ const en: Dict = {
   mUp: "UP",
   mDown: "DOWN",
   mNet: "NET",
+  mTotal: "TOTAL",
   offline: "Offline",
 
   status: "Status",
