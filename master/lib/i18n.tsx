@@ -54,6 +54,10 @@ const zhHant: Dict = {
   sortMem: "內存",
   sortCountry: "地區",
   sortStatus: "狀態",
+  sortNetUp: "↑ 即時",
+  sortNetDown: "↓ 即時",
+  sortNetSent: "↑ 累計",
+  sortNetRecv: "↓ 累計",
 
   // empty states
   noNodes: "尚無節點上報。",
@@ -260,6 +264,10 @@ const en: Dict = {
   sortMem: "Memory",
   sortCountry: "Region",
   sortStatus: "Status",
+  sortNetUp: "↑ Live",
+  sortNetDown: "↓ Live",
+  sortNetSent: "↑ Total",
+  sortNetRecv: "↓ Total",
 
   noNodes: "No nodes reporting yet.",
   startNodeHint: "Start a node pointing at this master:",

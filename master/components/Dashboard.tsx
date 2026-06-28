@@ -16,7 +16,17 @@ const VIEW_KEY = "wolf_view";
 const REGION_KEY = "wolf_region";
 const STATUS_KEY = "wolf_status";
 
-type SortMode = "custom" | "name" | "cpu" | "mem" | "country" | "status";
+type SortMode =
+  | "custom"
+  | "name"
+  | "cpu"
+  | "mem"
+  | "country"
+  | "status"
+  | "netUp"
+  | "netDown"
+  | "netSent"
+  | "netRecv";
 type ViewMode = "grid" | "list";
 type Region = "all" | "cn" | "oversea";
 type StatusFilter = "all" | "online" | "offline";
@@ -215,6 +225,10 @@ export default function Dashboard({
             { value: "mem", label: t("sortMem") },
             { value: "country", label: t("sortCountry") },
             { value: "status", label: t("sortStatus") },
+            { value: "netUp", label: t("sortNetUp") },
+            { value: "netDown", label: t("sortNetDown") },
+            { value: "netSent", label: t("sortNetSent") },
+            { value: "netRecv", label: t("sortNetRecv") },
           ]}
         />
       </div>
@@ -486,6 +500,14 @@ function sortNodes(nodes: NodeView[], mode: SortMode): NodeView[] {
       return arr.sort((a, b) => (a.country ?? "zz").localeCompare(b.country ?? "zz"));
     case "status":
       return arr.sort((a, b) => Number(b.online) - Number(a.online));
+    case "netUp":
+      return arr.sort((a, b) => b.metrics.netUpSpeed - a.metrics.netUpSpeed);
+    case "netDown":
+      return arr.sort((a, b) => b.metrics.netDownSpeed - a.metrics.netDownSpeed);
+    case "netSent":
+      return arr.sort((a, b) => b.metrics.netSent - a.metrics.netSent);
+    case "netRecv":
+      return arr.sort((a, b) => b.metrics.netRecv - a.metrics.netRecv);
     default:
       return arr.sort((a, b) => a.sortOrder - b.sortOrder);
   }
