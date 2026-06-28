@@ -217,35 +217,12 @@ export default function Dashboard({
 
         <div className="flex-1" />
 
-        <SelectMenu
-          ariaLabel={t("sort")}
-          value={sort}
-          onChange={(v) => persist(setSort, SORT_KEY, v)}
-          leading={<ArrowUpDown className="text-muted-foreground" />}
-          options={[
-            { value: "custom", label: t("sortDefault") },
-            { value: "name", label: t("sortName") },
-            { value: "cpu", label: t("sortCpu") },
-            { value: "mem", label: t("sortMem") },
-            { value: "country", label: t("sortCountry") },
-            { value: "status", label: t("sortStatus") },
-            { value: "netUp", label: t("sortNetUp") },
-            { value: "netDown", label: t("sortNetDown") },
-            { value: "netSent", label: t("sortNetSent") },
-            { value: "netRecv", label: t("sortNetRecv") },
-          ]}
+        <SortControl
+          sort={sort}
+          sortDir={sortDir}
+          onSort={(v) => persist(setSort, SORT_KEY, v)}
+          onDir={(v) => persist(setSortDir, SORT_DIR_KEY, v)}
         />
-        <button
-          type="button"
-          aria-label={sortDir === "desc" ? t("sortDirDesc") : t("sortDirAsc")}
-          title={sortDir === "desc" ? t("sortDirDesc") : t("sortDirAsc")}
-          onClick={() =>
-            persist(setSortDir, SORT_DIR_KEY, sortDir === "desc" ? "asc" : "desc")
-          }
-          className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-input bg-background text-muted-foreground transition-colors hover:bg-secondary/40 hover:text-foreground"
-        >
-          {sortDir === "desc" ? <ArrowDown className="size-4" /> : <ArrowUp className="size-4" />}
-        </button>
       </div>
 
       {error && polled && (
@@ -521,6 +498,74 @@ function ServerListRow({ node, first }: { node: NodeView; first: boolean }) {
       </div>
     </Link>
   );
+}
+
+// Sort dropdown + direction toggle, joined into one visual pill. The picker
+// is grouped (Identity / Resource / Network) so 10 entries stay scannable,
+// and the direction button is hidden when sort=custom (the user-defined
+// order has no asc/desc semantics).
+function SortControl({
+  sort,
+  sortDir,
+  onSort,
+  onDir,
+}: {
+  sort: SortMode;
+  sortDir: SortDir;
+  onSort: (v: SortMode) => void;
+  onDir: (v: SortDir) => void;
+}) {
+  const { t } = useI18n();
+  const hasDirection = sort !== "custom";
+  const dirTitle = directionHint(sort, sortDir, t);
+  return (
+    <div className="inline-flex items-stretch">
+      <SelectMenu
+        ariaLabel={t("sort")}
+        value={sort}
+        onChange={onSort}
+        leading={<ArrowUpDown className="text-muted-foreground" />}
+        className={hasDirection ? "[&>button]:rounded-r-none [&>button]:border-r-0" : undefined}
+        options={[
+          { value: "custom", label: t("sortDefault") },
+          { value: "name", label: t("sortName"), section: t("sortGroupIdentity") },
+          { value: "country", label: t("sortCountry"), section: t("sortGroupIdentity") },
+          { value: "status", label: t("sortStatus"), section: t("sortGroupIdentity") },
+          { value: "cpu", label: t("sortCpu"), section: t("sortGroupResource") },
+          { value: "mem", label: t("sortMem"), section: t("sortGroupResource") },
+          { value: "netUp", label: t("sortNetUp"), section: t("sortGroupNetwork") },
+          { value: "netDown", label: t("sortNetDown"), section: t("sortGroupNetwork") },
+          { value: "netSent", label: t("sortNetSent"), section: t("sortGroupNetwork") },
+          { value: "netRecv", label: t("sortNetRecv"), section: t("sortGroupNetwork") },
+        ]}
+      />
+      {hasDirection && (
+        <button
+          type="button"
+          aria-label={dirTitle}
+          title={dirTitle}
+          onClick={() => onDir(sortDir === "desc" ? "asc" : "desc")}
+          className="inline-flex h-8 w-8 items-center justify-center rounded-r-md border border-border bg-card text-muted-foreground transition-colors hover:bg-secondary/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+        >
+          {sortDir === "desc" ? <ArrowDown className="size-3.5" /> : <ArrowUp className="size-3.5" />}
+        </button>
+      )}
+    </div>
+  );
+}
+
+// directionHint adapts the tooltip to the sort mode: numeric metrics get
+// "largest first / smallest first", text fields get "Z→A / A→Z", status gets
+// "online first / offline first". Generic "asc/desc" reads as nonsense for
+// non-numeric sorts.
+function directionHint(sort: SortMode, dir: SortDir, t: (k: string) => string): string {
+  if (sort === "name" || sort === "country") {
+    return dir === "desc" ? t("sortDirZA") : t("sortDirAZ");
+  }
+  if (sort === "status") {
+    return dir === "desc" ? t("sortDirOnlineFirst") : t("sortDirOfflineFirst");
+  }
+  return dir === "desc" ? t("sortDirDesc") : t("sortDirAsc");
 }
 
 function sortNodes(nodes: NodeView[], mode: SortMode, dir: SortDir = "desc"): NodeView[] {

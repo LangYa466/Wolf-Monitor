@@ -19,6 +19,10 @@ export type SelectOption<T extends string> = {
   // icon for disabled options). Suppressed for the active row, which shows
   // a check instead.
   trailing?: React.ReactNode;
+  // Render a small uppercase header ABOVE this option in the popover.
+  // Lets a menu with 10+ entries form scannable groups (Identity / Resource
+  // / Network) without forcing the caller to add fake separator rows.
+  section?: string;
 };
 
 export function SelectMenu<T extends string>({
@@ -96,11 +100,23 @@ export function SelectMenu<T extends string>({
             : "pointer-events-none scale-95 opacity-0",
         )}
       >
-        {options.map((o) => {
+        {options.map((o, i) => {
           const active = o.value === value;
+          const prevSection = i > 0 ? options[i - 1].section : undefined;
+          const showHeader = o.section && o.section !== prevSection;
           return (
-            <button
-              key={o.value}
+            <React.Fragment key={o.value}>
+              {showHeader && (
+                <div
+                  className={cn(
+                    "px-2.5 pb-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground/70",
+                    i > 0 && "mt-1 border-t border-border/60 pt-2",
+                  )}
+                >
+                  {o.section}
+                </div>
+              )}
+              <button
               type="button"
               role="option"
               aria-selected={active}
@@ -124,6 +140,7 @@ export function SelectMenu<T extends string>({
               <span>{o.label}</span>
               {active ? <Check /> : o.trailing}
             </button>
+            </React.Fragment>
           );
         })}
       </div>
