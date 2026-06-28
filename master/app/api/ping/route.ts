@@ -40,22 +40,27 @@ export async function POST(req: NextRequest) {
   }
   // Bounds: latency in [-1, 60000] (-1 = unreachable sentinel; 60s caps absurd
   // values that would break chart y-axes). Reject NaN/Infinity via isFinite.
-  const results = (body.results ?? []).filter(
-    (r) =>
-      r &&
-      typeof r.taskId === "string" &&
-      r.taskId.length > 0 &&
-      r.taskId.length <= 128 &&
-      r.nodeId === boundHost &&
-      typeof r.ts === "number" &&
-      Number.isFinite(r.ts) &&
-      r.ts > 0 &&
-      typeof r.success === "boolean" &&
-      typeof r.latencyMs === "number" &&
-      Number.isFinite(r.latencyMs) &&
-      r.latencyMs >= -1 &&
-      r.latencyMs <= 60_000,
-  );
+  // The agent's self-reported nodeId is overwritten with boundHost so a
+  // pre-v1.6.1 agent (which sends its OS hostname) still has results stored
+  // under the server-assigned slug. Cross-node spoofing is still blocked —
+  // every row in a batch is clamped to the one identity the token authorizes.
+  const results = (body.results ?? [])
+    .filter(
+      (r) =>
+        r &&
+        typeof r.taskId === "string" &&
+        r.taskId.length > 0 &&
+        r.taskId.length <= 128 &&
+        typeof r.ts === "number" &&
+        Number.isFinite(r.ts) &&
+        r.ts > 0 &&
+        typeof r.success === "boolean" &&
+        typeof r.latencyMs === "number" &&
+        Number.isFinite(r.latencyMs) &&
+        r.latencyMs >= -1 &&
+        r.latencyMs <= 60_000,
+    )
+    .map((r) => ({ ...r, nodeId: boundHost }));
   try {
     await savePingResults(results);
     return NextResponse.json({ ok: true, stored: results.length });

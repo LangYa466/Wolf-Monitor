@@ -85,8 +85,13 @@ async function buildResponse(): Promise<SettingsResponse> {
     nodeAgentVersions[r.id] = r.agent_version ?? "";
   }
   const all = await listNodeTokens();
+  // "Unbound" in the UI = a token the admin can hand to a fresh server. Two
+  // shapes qualify: legacy NULL-bound tokens (pre-v1.6.1) and the new
+  // pre-assigned slug tokens that haven't yet received their first /api/report
+  // (no row in `nodes` for the slug).
+  const knownNodeIds = new Set(rows.map((r) => r.id));
   const unboundTokens = all
-    .filter((t) => t.nodeId === null)
+    .filter((t) => t.nodeId === null || !knownNodeIds.has(t.nodeId))
     .map(({ token, createdAt }) => ({ token, createdAt }));
 
   return {

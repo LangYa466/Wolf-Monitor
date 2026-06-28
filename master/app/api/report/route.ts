@@ -135,16 +135,19 @@ export async function POST(req: NextRequest) {
   }
   body.host = host;
   body.metrics = metrics;
-  // Authorization is hostname-bound: an unbound token binds on first call;
-  // a token bound to a different host is rejected.
-  if (!(await authorizeReport(token, body.host.hostname))) {
+  // Identity comes from the token, not the agent's self-reported hostname:
+  // pre-assigned tokens carry a server-minted slug, legacy tokens fall back
+  // to the bound hostname. Returns null on a missing/wrong/squat-rejected
+  // token.
+  const nodeId = await authorizeReport(token, body.host.hostname);
+  if (!nodeId) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
   try {
     // CDN-aware client IP; resolve country once per node (or when IP changes).
     const ip = clientIp(req.headers);
-    const existing = await getNodeNet(body.host.hostname);
+    const existing = await getNodeNet(nodeId);
     let country: string | null | undefined;
     // Admin-pinned country: never overwrite from ipinfo. saveReport's SQL also
     // guards this; we short-circuit here to avoid a wasted network round trip.
@@ -154,7 +157,7 @@ export async function POST(req: NextRequest) {
     ) {
       country = await resolveCountry(ip);
     }
-    const node = await saveReport(body, { ip, country });
+    const node = await saveReport(body, { ip, country, id: nodeId });
     // Drive alert/offline evaluation off node traffic (throttled), so alerts
     // work even when no external cron is configured. Runs after the response
     // via waitUntil, so it never delays the node.

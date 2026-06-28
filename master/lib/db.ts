@@ -530,14 +530,17 @@ function sanitizeMetrics(m: Metrics): Metrics {
 // sort_order placing them at the end.
 export async function saveReport(
   report: Report,
-  opts: { ip?: string | null; country?: string | null } = {}
+  opts: { ip?: string | null; country?: string | null; id?: string } = {}
 ): Promise<NodeView> {
   await ensureSchema();
   const pool = getPool();
   const safeHost = sanitizeHost(report.host);
   const safeMetrics = sanitizeMetrics(report.metrics);
-  // hostname is the PK and FK target — reject anything outside a strict
-  // charset (no control chars, no whitespace, no oversized strings).
+  // hostname goes into host JSONB (display only). When opts.id is set, the
+  // identity is server-assigned (slug from node_tokens) and the hostname
+  // need not be unique; just validate its shape so it can't carry control
+  // chars into the JSONB column. Legacy callers without opts.id still use
+  // hostname-as-id (kept for back-compat with rows minted pre-v1.6.1).
   if (!HOSTNAME_RE.test(safeHost.hostname)) {
     throw new Error("invalid hostname");
   }
@@ -546,7 +549,10 @@ export async function saveReport(
   if (hostJson.length > MAX_HOST_BYTES || metricsJson.length > MAX_METRICS_BYTES) {
     throw new Error("report payload too large");
   }
-  const id = safeHost.hostname;
+  const id = opts.id ?? safeHost.hostname;
+  if (!HOSTNAME_RE.test(id)) {
+    throw new Error("invalid node id");
+  }
   const now = Date.now();
   const ip = opts.ip ?? null;
   const country = opts.country ?? null;

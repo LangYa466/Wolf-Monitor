@@ -455,14 +455,52 @@ export async function rotateTokenForNode(hostname: string): Promise<string> {
   return ensureTokenForNode(hostname);
 }
 
-// Create a token that isn't yet bound to any node. The first /api/report
-// presenting this token binds it to that report's hostname.
+// Server-assigned node id slug. Replaces the old "first-reported-hostname
+// becomes the id" scheme: every new token is pre-bound to a fresh slug at
+// creation time, so two machines that both call themselves "localhost"
+// (default on many fresh VPS images) get distinct identities. Format is
+// `node_<10 base32 chars>` — fits HOSTNAME_RE, urlsafe, ~50 bits of entropy
+// which is plenty for an identifier (collisions are checked below).
+function generateNodeIdSlug(): string {
+  // Crockford base32 minus ambiguous chars, lowercased.
+  const alphabet = "abcdefghjkmnpqrstvwxyz23456789";
+  const bytes = randomBytes(10);
+  let out = "node_";
+  for (const b of bytes) out += alphabet[b % alphabet.length];
+  return out;
+}
+
+async function mintUniqueNodeIdSlug(): Promise<string> {
+  const pool = getPool();
+  // Collision probability is astronomically low, but loop a few times anyway
+  // — any non-null hit means we don't want to overwrite an existing token's
+  // identity. After 5 misses something's wrong with the RNG; surface it.
+  for (let i = 0; i < 5; i++) {
+    const slug = generateNodeIdSlug();
+    const { rows } = await pool.query<{ exists: boolean }>(
+      `SELECT EXISTS (
+         SELECT 1 FROM node_tokens WHERE node_id = $1
+         UNION ALL
+         SELECT 1 FROM nodes WHERE id = $1
+       ) AS exists`,
+      [slug],
+    );
+    if (!rows[0]?.exists) return slug;
+  }
+  throw new Error("failed to mint a unique node id slug");
+}
+
+// Create a pre-assigned token. The slug stored in node_id IS the node's
+// identity from day one — the agent's self-reported hostname is irrelevant
+// for routing. Saved to claimed_node_id too so the hostname-squat guard in
+// authorizeReport doesn't trip on the (now ignored) hostname argument.
 export async function createUnboundToken(): Promise<string> {
   const token = randomBytes(18).toString("base64url");
+  const slug = await mintUniqueNodeIdSlug();
   await getPool().query(
-    `INSERT INTO node_tokens (token, token_enc, token_hash, node_id, created_at)
-       VALUES (NULL, $1::jsonb, $2, NULL, $3)`,
-    [JSON.stringify(encNodeToken(token)), hashNodeToken(token), Date.now()],
+    `INSERT INTO node_tokens (token, token_enc, token_hash, node_id, claimed_node_id, created_at)
+       VALUES (NULL, $1::jsonb, $2, $3, $3, $4)`,
+    [JSON.stringify(encNodeToken(token)), hashNodeToken(token), slug, Date.now()],
   );
   return token;
 }
@@ -555,17 +593,26 @@ function legacyBindRefuses(hostname: string, token: string): boolean {
   return prev !== token;
 }
 
+// authorizeReport returns the node id the report should be stored under
+// (or null on failure). Three cases:
+//   • Pre-assigned token (new path, post-v1.6.1): node_id is already a slug
+//     minted at createUnboundToken time. The hostname arg is ignored —
+//     identity is decoupled from what the agent self-reports.
+//   • Legacy unbound token (node_id IS NULL): first /api/report binds the
+//     row to the reported hostname, keeping the old "hostname == id"
+//     behaviour for tokens minted before this change.
+//   • Legacy hostname-bound token: bound !== hostname is rejected so a
+//     compromised token can't be replayed under a different identity.
+// The claimed_node_id squat guard still applies for legacy rows; new rows
+// have claimed_node_id == node_id so the check is a no-op.
 export async function authorizeReport(
   provided: string | null | undefined,
   hostname: string,
-): Promise<boolean> {
-  if (!provided) return false;
+): Promise<string | null> {
+  if (!provided) return null;
   const pool = getPool();
   const digest = hashNodeToken(provided);
   try {
-    // Lookup by digest first; the OR-on-plaintext branch catches legacy rows
-    // whose `token_hash` hasn't been backfilled yet (pgcrypto not installed
-    // at migrate time).
     const { rows } = await pool.query<{
       node_id: string | null;
       claimed_node_id: string | null;
@@ -577,7 +624,13 @@ export async function authorizeReport(
     if (rows.length) {
       const bound = rows[0].node_id;
       const claimed = rows[0].claimed_node_id;
-      if (claimed !== null && claimed !== hostname) return false;
+      // Pre-assigned slug path: bound is set, claimed matches bound, hostname
+      // is irrelevant. Skip the squat check (it would compare slug vs
+      // hostname and always reject).
+      if (bound !== null && claimed === bound) return bound;
+      // Legacy hostname-bound: enforce the squat guard against the reported
+      // hostname as before.
+      if (claimed !== null && claimed !== hostname) return null;
       if (bound === null) {
         await pool.query(
           `UPDATE node_tokens
@@ -588,9 +641,9 @@ export async function authorizeReport(
               AND node_id IS NULL`,
           [hostname, digest, provided],
         );
-        return true;
+        return hostname;
       }
-      if (bound !== hostname) return false;
+      if (bound !== hostname) return null;
       if (claimed === null) {
         await pool.query(
           `UPDATE node_tokens SET claimed_node_id = $1
@@ -599,7 +652,7 @@ export async function authorizeReport(
           [hostname, digest, provided],
         );
       }
-      return true;
+      return bound;
     }
   } catch {
     // token_hash / claimed_node_id columns missing on an ancient DB — fall
@@ -615,15 +668,18 @@ export async function authorizeReport(
           `UPDATE node_tokens SET node_id = $1 WHERE token = $2 AND node_id IS NULL`,
           [hostname, provided],
         );
-        return true;
+        return hostname;
       }
-      return bound === hostname;
+      return bound === hostname ? bound : null;
     }
   }
-  if (legacyBindRefuses(hostname, provided)) return false;
+  if (legacyBindRefuses(hostname, provided)) return null;
   const ok = await legacyTokenMatch(provided);
-  if (ok) recordLegacyBind(hostname, provided);
-  return ok;
+  if (ok) {
+    recordLegacyBind(hostname, provided);
+    return hostname;
+  }
+  return null;
 }
 
 // authorizeForHost: gate for endpoints that already know which node is calling
