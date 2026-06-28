@@ -13,7 +13,6 @@ import { SelectMenu } from "@/components/ui/select-menu";
 const POLL_MS = 3000;
 const SORT_KEY = "wolf_sort";
 const SORT_DIR_KEY = "wolf_sort_dir";
-const VIEW_KEY = "wolf_view";
 const REGION_KEY = "wolf_region";
 const STATUS_KEY = "wolf_status";
 
@@ -51,7 +50,10 @@ export default function Dashboard({
   const [polled, setPolled] = useState(false);
   const [sort, setSort] = useState<SortMode>("custom");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
-  const [view, setView] = useState<ViewMode>("grid");
+  // View is deliberately not persisted: per the operator's request, every
+  // page load resets to list. Card mode is a one-off preview, not a sticky
+  // preference.
+  const [view, setView] = useState<ViewMode>("list");
   const [region, setRegion] = useState<Region>("all");
   const [status, setStatus] = useState<StatusFilter>("all");
   // Start at 0 (renders "—") so SSR and first client render agree on the
@@ -64,7 +66,6 @@ export default function Dashboard({
   useEffect(() => {
     setSort((localStorage.getItem(SORT_KEY) as SortMode) || "custom");
     setSortDir((localStorage.getItem(SORT_DIR_KEY) as SortDir) || "desc");
-    setView((localStorage.getItem(VIEW_KEY) as ViewMode) || "grid");
     setRegion((localStorage.getItem(REGION_KEY) as Region) || "all");
     setStatus((localStorage.getItem(STATUS_KEY) as StatusFilter) || "all");
     setNow(Date.now());
@@ -198,10 +199,10 @@ export default function Dashboard({
           variant="card"
           size="sm"
           value={view}
-          onChange={(v) => persist(setView, VIEW_KEY, v)}
+          onChange={setView}
           options={[
-            { value: "grid", icon: <LayoutGrid />, title: t("viewGrid"), ariaLabel: t("viewGrid") },
             { value: "list", icon: <List />, title: t("viewList"), ariaLabel: t("viewList") },
+            { value: "grid", icon: <LayoutGrid />, title: t("viewGrid"), ariaLabel: t("viewGrid") },
           ]}
         />
 
