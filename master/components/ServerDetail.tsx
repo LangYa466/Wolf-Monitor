@@ -664,10 +664,24 @@ function niceMax(v: number): number {
 }
 
 function rangeXLabel(range: RangeKey, points: HistoryPoint[]): string {
-  if (range !== "realtime") {
-    return RANGES.find((r) => r.key === range)!.xLabel;
+  // Label the x-axis with the actual span of returned data, not the nominal
+  // window. A node installed an hour ago has ~1h of history; if we still
+  // claimed "7d" on its 7d-range chart, the dense cluster of points at the
+  // right edge would read as a graphing bug. When data fills the window,
+  // both numbers agree and the label matches the picker.
+  if (points.length < 2) {
+    return range === "realtime" ? "" : RANGES.find((r) => r.key === range)!.xLabel;
   }
-  if (points.length < 2) return "";
-  const mins = Math.round((points[points.length - 1].ts - points[0].ts) / 60000);
+  const spanMs = points[points.length - 1].ts - points[0].ts;
+  return formatSpan(spanMs);
+}
+
+function formatSpan(ms: number): string {
+  if (ms <= 0) return "";
+  const days = Math.floor(ms / 86_400_000);
+  if (days >= 1) return `${days}d`;
+  const hours = Math.floor(ms / 3_600_000);
+  if (hours >= 1) return `${hours}h`;
+  const mins = Math.round(ms / 60_000);
   return mins > 0 ? `${mins}m` : "";
 }
