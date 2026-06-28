@@ -58,6 +58,8 @@ const zhHant: Dict = {
   sortNetDown: "↓ 即時",
   sortNetSent: "↑ 累計",
   sortNetRecv: "↓ 累計",
+  sortDirDesc: "由大到小（點擊改為由小到大）",
+  sortDirAsc: "由小到大（點擊改為由大到小）",
 
   // empty states
   noNodes: "尚無節點上報。",
@@ -269,6 +271,8 @@ const en: Dict = {
   sortNetDown: "↓ Live",
   sortNetSent: "↑ Total",
   sortNetRecv: "↓ Total",
+  sortDirDesc: "Largest first (click for smallest first)",
+  sortDirAsc: "Smallest first (click for largest first)",
 
   noNodes: "No nodes reporting yet.",
   startNodeHint: "Start a node pointing at this master:",

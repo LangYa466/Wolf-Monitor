@@ -12,6 +12,7 @@ import { SelectMenu } from "@/components/ui/select-menu";
 
 const POLL_MS = 3000;
 const SORT_KEY = "wolf_sort";
+const SORT_DIR_KEY = "wolf_sort_dir";
 const VIEW_KEY = "wolf_view";
 const REGION_KEY = "wolf_region";
 const STATUS_KEY = "wolf_status";
@@ -28,6 +29,7 @@ type SortMode =
   | "netSent"
   | "netRecv";
 type ViewMode = "grid" | "list";
+type SortDir = "desc" | "asc";
 type Region = "all" | "cn" | "oversea";
 type StatusFilter = "all" | "online" | "offline";
 
@@ -48,6 +50,7 @@ export default function Dashboard({
   // flash red while the first /api/nodes request is still in flight.
   const [polled, setPolled] = useState(false);
   const [sort, setSort] = useState<SortMode>("custom");
+  const [sortDir, setSortDir] = useState<SortDir>("desc");
   const [view, setView] = useState<ViewMode>("grid");
   const [region, setRegion] = useState<Region>("all");
   const [status, setStatus] = useState<StatusFilter>("all");
@@ -60,6 +63,7 @@ export default function Dashboard({
   // Live updates + 1s clock tick.
   useEffect(() => {
     setSort((localStorage.getItem(SORT_KEY) as SortMode) || "custom");
+    setSortDir((localStorage.getItem(SORT_DIR_KEY) as SortDir) || "desc");
     setView((localStorage.getItem(VIEW_KEY) as ViewMode) || "grid");
     setRegion((localStorage.getItem(REGION_KEY) as Region) || "all");
     setStatus((localStorage.getItem(STATUS_KEY) as StatusFilter) || "all");
@@ -126,8 +130,8 @@ export default function Dashboard({
     else if (region === "oversea") arr = arr.filter((n) => n.country && n.country !== "cn");
     if (status === "online") arr = arr.filter((n) => n.online);
     else if (status === "offline") arr = arr.filter((n) => !n.online);
-    return sortNodes(arr, sort);
-  }, [nodes, sort, region, status]);
+    return sortNodes(arr, sort, sortDir);
+  }, [nodes, sort, sortDir, region, status]);
 
   return (
     <div>
@@ -231,6 +235,17 @@ export default function Dashboard({
             { value: "netRecv", label: t("sortNetRecv") },
           ]}
         />
+        <button
+          type="button"
+          aria-label={sortDir === "desc" ? t("sortDirDesc") : t("sortDirAsc")}
+          title={sortDir === "desc" ? t("sortDirDesc") : t("sortDirAsc")}
+          onClick={() =>
+            persist(setSortDir, SORT_DIR_KEY, sortDir === "desc" ? "asc" : "desc")
+          }
+          className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-input bg-background text-muted-foreground transition-colors hover:bg-secondary/40 hover:text-foreground"
+        >
+          {sortDir === "desc" ? <ArrowDown className="size-4" /> : <ArrowUp className="size-4" />}
+        </button>
       </div>
 
       {error && polled && (
@@ -508,30 +523,45 @@ function ServerListRow({ node, first }: { node: NodeView; first: boolean }) {
   );
 }
 
-function sortNodes(nodes: NodeView[], mode: SortMode): NodeView[] {
+function sortNodes(nodes: NodeView[], mode: SortMode, dir: SortDir = "desc"): NodeView[] {
+  // Build comparators in their natural orientation (alphabetical / online-first
+  // / largest-first for metrics, custom sortOrder ascending) and let the dir
+  // flag invert them. desc on a metric = biggest first; asc = smallest first.
   const arr = [...nodes];
+  let cmp: (a: NodeView, b: NodeView) => number;
   switch (mode) {
     case "name":
-      return arr.sort((a, b) => a.host.hostname.localeCompare(b.host.hostname));
+      cmp = (a, b) => a.host.hostname.localeCompare(b.host.hostname);
+      break;
     case "cpu":
-      return arr.sort((a, b) => b.metrics.cpuUsage - a.metrics.cpuUsage);
+      cmp = (a, b) => b.metrics.cpuUsage - a.metrics.cpuUsage;
+      break;
     case "mem":
-      return arr.sort((a, b) => b.metrics.memPercent - a.metrics.memPercent);
+      cmp = (a, b) => b.metrics.memPercent - a.metrics.memPercent;
+      break;
     case "country":
-      return arr.sort((a, b) => (a.country ?? "zz").localeCompare(b.country ?? "zz"));
+      cmp = (a, b) => (a.country ?? "zz").localeCompare(b.country ?? "zz");
+      break;
     case "status":
-      return arr.sort((a, b) => Number(b.online) - Number(a.online));
+      cmp = (a, b) => Number(b.online) - Number(a.online);
+      break;
     case "netUp":
-      return arr.sort((a, b) => b.metrics.netUpSpeed - a.metrics.netUpSpeed);
+      cmp = (a, b) => b.metrics.netUpSpeed - a.metrics.netUpSpeed;
+      break;
     case "netDown":
-      return arr.sort((a, b) => b.metrics.netDownSpeed - a.metrics.netDownSpeed);
+      cmp = (a, b) => b.metrics.netDownSpeed - a.metrics.netDownSpeed;
+      break;
     case "netSent":
-      return arr.sort((a, b) => b.metrics.netSent - a.metrics.netSent);
+      cmp = (a, b) => b.metrics.netSent - a.metrics.netSent;
+      break;
     case "netRecv":
-      return arr.sort((a, b) => b.metrics.netRecv - a.metrics.netRecv);
+      cmp = (a, b) => b.metrics.netRecv - a.metrics.netRecv;
+      break;
     default:
-      return arr.sort((a, b) => a.sortOrder - b.sortOrder);
+      cmp = (a, b) => a.sortOrder - b.sortOrder;
   }
+  const sign = dir === "asc" ? -1 : 1;
+  return arr.sort((a, b) => sign * cmp(a, b));
 }
 
 function hostHint(): string {
