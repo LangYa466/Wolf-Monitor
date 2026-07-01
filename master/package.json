@@ -23,7 +23,7 @@
     "lucide-react": "^1.17.0",
     "next": "15.5.18",
     "pg": "8.21.0",
-    "react": "19.0.0",
+    "react": "19.2.7",
     "react-dom": "19.0.0",
     "request-ip": "3.3.0",
     "tailwind-merge": "^2.6.0",
@@ -45,7 +45,7 @@
   "devDependencies": {
     "@types/node": "^22.10.5",
     "@types/pg": "^8.11.10",
-    "@types/react": "^19.0.7",
+    "@types/react": "^19.2.17",
     "@types/react-dom": "^19.0.3",
     "@types/request-ip": "^0.0.41",
     "@types/validator": "^13.15.0",
