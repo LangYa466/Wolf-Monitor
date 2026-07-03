@@ -4,6 +4,7 @@ import { userCount } from "@/lib/auth";
 import { currentUser } from "@/lib/session";
 import type { NodeView } from "@/lib/types";
 import Dashboard from "@/components/Dashboard";
+import GuestLoginModal from "@/components/GuestLoginModal";
 
 // SSR: render the first paint on the server with current data from Postgres,
 // then the client component takes over and polls for live updates.
@@ -38,5 +39,10 @@ export default async function Page() {
   // error so an admin still lands on the dashboard's error screen.
   if (!authed && !isPublic && !dbError) redirect("/login");
 
-  return <Dashboard initial={initial} dbError={dbError} isPublic={isPublic} />;
+  return (
+    <>
+      <Dashboard initial={initial} dbError={dbError} isPublic={isPublic} />
+      {isPublic && <GuestLoginModal />}
+    </>
+  );
 }

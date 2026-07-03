@@ -104,6 +104,11 @@ const zhHant: Dict = {
   tabDetail: "詳細資訊",
   tabNetwork: "網路",
   guestLocked: "訪客不可查看",
+  guestModalTitle: "以訪客身份繼續？",
+  guestModalDesc:
+    "目前未登入。訪客可查看基本狀態，但 IP、CPU 溫度、延遲等敏感資訊會被隱藏。管理者請登入以檢視完整資料。",
+  guestModalContinue: "以訪客繼續",
+  guestModalLogin: "登入",
   cnAutoProxyHint: "已偵測到中國大陸節點，自動使用 {proxy} 鏡像下載 install 腳本與 wolf-node 二進制。",
   chProcesses: "進程數",
   chDisk: "磁盤",
@@ -323,6 +328,11 @@ const en: Dict = {
   tabDetail: "Details",
   tabNetwork: "Network",
   guestLocked: "Guests can't view this range",
+  guestModalTitle: "Continue as guest?",
+  guestModalDesc:
+    "You're not logged in. Guests see basic status only — IPs, CPU temperature, and latency stay hidden. Sign in for the full dashboard.",
+  guestModalContinue: "Continue as guest",
+  guestModalLogin: "Log in",
   cnAutoProxyHint: "Mainland-China node detected — auto-routing install through {proxy}.",
   chProcesses: "Processes",
   chDisk: "Disk",

@@ -444,7 +444,9 @@ export function publicNodes(nodes: NodeView[]): NodeView[] {
         opaqueId: n.opaqueId,
         name: n.name, // admin-set display name (intentional)
         host: { ...n.host, hostname: "" },
-        metrics: n.metrics,
+        // Strip cpuTemp — thermal readings expose bare-metal vs cloud-VM
+        // status and can leak workload signals; treated like IP: admin-only.
+        metrics: { ...n.metrics, cpuTemp: 0 },
         lastSeen: n.lastSeen,
         online: n.online,
         ip: null,

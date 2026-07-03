@@ -70,8 +70,12 @@ export async function GET(
 
   try {
     const points = await getHistory(id, limit, sinceMs);
+    // Same admin-only gate as ip / hostname in publicNodes: strip cpuTemp so
+    // guests can't reconstruct the thermal timeline (leaks workload and
+    // bare-metal-vs-cloud state).
+    const safe = isGuest ? points.map((p) => ({ ...p, cpuTemp: 0 })) : points;
     return NextResponse.json(
-      { points },
+      { points: safe },
       { headers: { "Cache-Control": "no-store" } }
     );
   } catch (err) {

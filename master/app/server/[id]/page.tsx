@@ -4,6 +4,7 @@ import { userCount } from "@/lib/auth";
 import { currentUser } from "@/lib/session";
 import type { NodeView } from "@/lib/types";
 import ServerDetail from "@/components/ServerDetail";
+import GuestLoginModal from "@/components/GuestLoginModal";
 
 export const dynamic = "force-dynamic";
 
@@ -41,5 +42,10 @@ export default async function ServerPage({
   if (!authed && !isPublic && !dbError) redirect("/login");
   if (!node && !dbError) notFound();
 
-  return <ServerDetail id={id} initial={node} dbError={dbError} isPublic={isPublic} />;
+  return (
+    <>
+      <ServerDetail id={id} initial={node} dbError={dbError} isPublic={isPublic} />
+      {isPublic && <GuestLoginModal />}
+    </>
+  );
 }
