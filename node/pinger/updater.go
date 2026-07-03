@@ -4,6 +4,7 @@ import (
 	"context"
 	"log"
 	"net/http"
+	"os"
 	"os/exec"
 	"regexp"
 	"runtime"
@@ -141,7 +142,18 @@ func runInstallScript(master, token, version, transport string, interval int, pr
 	// proxy. When set, both the bootstrap fetch of install.sh AND install.sh's
 	// own binary/SHA256SUMS downloads go through it (install.sh receives -p).
 	// When empty, neither is proxied — same behaviour as before.
-	const script = `set -e
+	//
+	// We write the script to a file rather than passing it via `bash -c "..."`
+	// through systemd-run. systemd's ExecStart parser eagerly expands
+	// `${VAR}` specifiers on every argv element, so a `-c` argument
+	// containing `${PROXY%/}` / `${ARGS[@]}` becomes empty strings before
+	// bash ever sees the script (v1.6.2 / v1.6.3 shipped with this bug and
+	// self-update silently failed for weeks — see `wolf-node-update.service`
+	// journal: "Invalid environment variable name evaluates to an empty
+	// string: ARGS[@], PROXY%/"). A file path has no `${…}` so it survives
+	// intact.
+	const script = `#!/bin/bash
+set -e
 raw="https://raw.githubusercontent.com/LangYa466/Wolf-Monitor/main/node/install.sh"
 PROXY="$6"
 if [ -n "$PROXY" ]; then
@@ -157,30 +169,40 @@ if command -v curl >/dev/null 2>&1; then
   bash <(curl -fsSL --max-time 60 "$url") "${ARGS[@]}"
 else
   bash <(wget -qO- --timeout=60 "$url") "${ARGS[@]}"
-fi`
+fi
+`
+	// Write to /opt/wolf, NOT /tmp. wolf-node's systemd unit sets
+	// PrivateTmp=true, giving it a per-service /tmp that the newly-spawned
+	// wolf-node-update transient service can't see. install.sh grants
+	// ReadWritePaths=/opt/wolf, so the updater helper is guaranteed
+	// writable AND visible across services.
+	scriptPath := "/opt/wolf/self-update.sh"
+	if err := os.WriteFile(scriptPath, []byte(script), 0o700); err != nil {
+		return err
+	}
+
+	scriptArgs := []string{scriptPath, master, token, version, transport, intervalStr, proxy}
 	// Try systemd-run first (always present on a systemd host). Falls back
 	// to plain setsid for non-systemd setups even though install.sh wouldn't
 	// work there — at least the helper survives the wolf-node SIGTERM.
-	args := []string{"-c", script, "wolf-update", master, token, version, transport, intervalStr, proxy}
 	if path, err := exec.LookPath("systemd-run"); err == nil {
 		full := append([]string{
 			"--collect", "--no-block",
 			"--unit", "wolf-node-update",
 			"--description", "wolf-node self-update",
-			"bash",
-		}, args...)
+		}, scriptArgs...)
 		cmd := exec.Command(path, full...)
 		cmd.Stdout = log.Writer()
 		cmd.Stderr = log.Writer()
 		return cmd.Run()
 	}
 	if path, err := exec.LookPath("setsid"); err == nil {
-		cmd := exec.Command(path, append([]string{"bash"}, args...)...)
+		cmd := exec.Command(path, append([]string{"bash"}, scriptArgs...)...)
 		cmd.Stdout = log.Writer()
 		cmd.Stderr = log.Writer()
 		return cmd.Start()
 	}
-	cmd := exec.Command("bash", args...)
+	cmd := exec.Command("bash", scriptArgs...)
 	cmd.Stdout = log.Writer()
 	cmd.Stderr = log.Writer()
 	return cmd.Run()
