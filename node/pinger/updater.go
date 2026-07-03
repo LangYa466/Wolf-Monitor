@@ -91,28 +91,43 @@ func (r *Runner) maybeSelfUpdate(desired string) {
 	// this process. If we're still here, the install failed — keep serving.
 }
 
-// pickBootstrapProxy probes whether raw.githubusercontent.com is reachable
-// from this host. If not (mainland-CN networks routinely block it), returns
-// ghfast.top so the self-updater can wrap both the bootstrap fetch and the
-// binary+SHA256SUMS downloads through the mirror. Returns "" when direct
-// GitHub works — no mirror means install.sh keeps its clean trust anchor
-// (checksum manifest fetched via github.com), which is the strong default.
+// pickBootstrapProxy probes whether the paths install.sh will hit are
+// reachable from this host. If not (mainland-CN networks routinely block
+// them), returns ghfast.top so the self-updater can wrap both the bootstrap
+// fetch and the binary+SHA256SUMS downloads through the mirror. Returns ""
+// when direct GitHub works — no mirror means install.sh keeps its clean
+// trust anchor (checksum manifest fetched via github.com), which is the
+// strong default.
+//
+// We probe github.com/releases (redirects to objects.githubusercontent.com,
+// the CDN that actually serves binaries) rather than raw.githubusercontent
+// alone — v1.6.3 shipped with raw-only probing and misfired on Tencent
+// Cloud boxes where raw was cached-through but github.com/releases hung,
+// leaving install.sh to time out on binary download.
 func pickBootstrapProxy() string {
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodHead,
-		"https://raw.githubusercontent.com/LangYa466/Wolf-Monitor/main/node/install.sh", nil)
-	if err != nil {
-		return ""
+	probes := []string{
+		"https://github.com/LangYa466/Wolf-Monitor/releases/latest/download/SHA256SUMS",
+		"https://raw.githubusercontent.com/LangYa466/Wolf-Monitor/main/node/install.sh",
 	}
-	client := &http.Client{Timeout: 3 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return ghfastProxy
-	}
-	resp.Body.Close()
-	if resp.StatusCode >= 500 {
-		return ghfastProxy
+	client := &http.Client{Timeout: 4 * time.Second}
+	// If ANY probe fails or times out, route through the mirror — one broken
+	// CDN is enough to make install.sh fail, and the mirror covers both.
+	for _, u := range probes {
+		ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+		req, err := http.NewRequestWithContext(ctx, http.MethodHead, u, nil)
+		if err != nil {
+			cancel()
+			continue
+		}
+		resp, err := client.Do(req)
+		cancel()
+		if err != nil {
+			return ghfastProxy
+		}
+		resp.Body.Close()
+		if resp.StatusCode >= 500 {
+			return ghfastProxy
+		}
 	}
 	return ""
 }
