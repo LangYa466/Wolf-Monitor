@@ -4,6 +4,8 @@ import (
 	"context"
 	"time"
 
+	"strings"
+
 	"github.com/shirou/gopsutil/v4/cpu"
 	"github.com/shirou/gopsutil/v4/disk"
 	"github.com/shirou/gopsutil/v4/host"
@@ -11,6 +13,7 @@ import (
 	"github.com/shirou/gopsutil/v4/mem"
 	"github.com/shirou/gopsutil/v4/net"
 	"github.com/shirou/gopsutil/v4/process"
+	"github.com/shirou/gopsutil/v4/sensors"
 )
 
 // Collector keeps the previous IO/network counter snapshot so it can derive
@@ -60,6 +63,11 @@ func (c *Collector) Host() HostInfo {
 		hi.PlatformVer = info.PlatformVersion
 		hi.KernelArch = info.KernelArch
 		hi.BootTime = info.BootTime
+		// host.Info already probes virtualization on Linux (systemd-detect-virt
+		// / dmi vendor / cgroup markers). Empty string == bare metal; anything
+		// else is a hypervisor name like "kvm", "vmware", "xen", "docker", "lxc".
+		hi.Virtualization = info.VirtualizationSystem
+		hi.VirtRole = info.VirtualizationRole
 	}
 	if vm, err := mem.VirtualMemory(); err == nil {
 		hi.MemTotal = vm.Total
@@ -92,6 +100,8 @@ func (c *Collector) Collect(ctx context.Context) Metrics {
 	if pcts, err := cpu.PercentWithContext(ctx, 300*time.Millisecond, false); err == nil && len(pcts) > 0 {
 		m.CPUUsage = round2(pcts[0])
 	}
+
+	m.CPUTemp = readCPUTemp(ctx)
 
 	if vm, err := mem.VirtualMemory(); err == nil {
 		m.MemUsed = vm.Used
@@ -165,4 +175,62 @@ func perSec(cur, prev uint64, elapsed float64) uint64 {
 
 func round2(f float64) float64 {
 	return float64(int64(f*100+0.5)) / 100
+}
+
+// readCPUTemp picks the best CPU-package temperature from the platform's
+// available sensors and returns °C (0 when nothing usable is exposed — most
+// cloud VMs, containers, or Windows without WMI perms). Preference order:
+//
+//  1. Intel coretemp / AMD k10temp package sensor.
+//  2. Any Intel core sensor (max across cores as a proxy for package).
+//  3. ARM cpu_thermal / SoC thermal zone.
+//  4. Anything with "cpu" in the sensor key.
+//  5. ACPI thermal zone (acpitz) as a last resort.
+func readCPUTemp(ctx context.Context) float64 {
+	temps, err := sensors.TemperaturesWithContext(ctx)
+	if err != nil || len(temps) == 0 {
+		return 0
+	}
+	var pkg, coreMax, cpuAny, socThermal, acpi float64
+	for _, s := range temps {
+		if s.Temperature <= 0 || s.Temperature > 200 {
+			continue
+		}
+		key := strings.ToLower(s.SensorKey)
+		switch {
+		case strings.Contains(key, "package") && (strings.Contains(key, "coretemp") || strings.Contains(key, "k10temp")):
+			if s.Temperature > pkg {
+				pkg = s.Temperature
+			}
+		case strings.HasPrefix(key, "coretemp_core") || strings.Contains(key, "core "):
+			if s.Temperature > coreMax {
+				coreMax = s.Temperature
+			}
+		case strings.Contains(key, "cpu_thermal") || strings.Contains(key, "soc_thermal"):
+			if s.Temperature > socThermal {
+				socThermal = s.Temperature
+			}
+		case strings.Contains(key, "cpu"):
+			if s.Temperature > cpuAny {
+				cpuAny = s.Temperature
+			}
+		case strings.Contains(key, "acpitz") || strings.Contains(key, "thermal_zone"):
+			if s.Temperature > acpi {
+				acpi = s.Temperature
+			}
+		}
+	}
+	switch {
+	case pkg > 0:
+		return round2(pkg)
+	case coreMax > 0:
+		return round2(coreMax)
+	case socThermal > 0:
+		return round2(socThermal)
+	case cpuAny > 0:
+		return round2(cpuAny)
+	case acpi > 0:
+		return round2(acpi)
+	}
+	return 0
 }

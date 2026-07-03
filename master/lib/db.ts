@@ -199,6 +199,10 @@ ALTER TABLE metrics_history ADD COLUMN IF NOT EXISTS procs     BIGINT NOT NULL D
 ALTER TABLE metrics_history ADD COLUMN IF NOT EXISTS tcp       BIGINT NOT NULL DEFAULT 0;
 ALTER TABLE metrics_history ADD COLUMN IF NOT EXISTS mem_used  BIGINT NOT NULL DEFAULT 0;
 ALTER TABLE metrics_history ADD COLUMN IF NOT EXISTS swap_used BIGINT NOT NULL DEFAULT 0;
+-- CPU package temperature in °C. 0 means "no sensor" (cloud VMs, containers,
+-- Windows without WMI), so the detail-page chart hides the panel when the
+-- window is all-zero rather than drawing a flat baseline.
+ALTER TABLE metrics_history ADD COLUMN IF NOT EXISTS cpu_temp DOUBLE PRECISION NOT NULL DEFAULT 0;
 
 -- Stable auto-increment id (hidden behind an encrypted opaque id in URLs) and
 -- an optional admin-set display name. Adding a serial column backfills existing
@@ -495,6 +499,8 @@ function sanitizeHost(h: HostInfo): HostInfo {
     // binaries that don't report it land here as empty string and the UI
     // renders "—".
     agentVersion: s(h?.agentVersion, 64),
+    virtualization: s(h?.virtualization, 32),
+    virtRole: s(h?.virtRole, 16),
   };
 }
 
@@ -503,6 +509,7 @@ function sanitizeMetrics(m: Metrics): Metrics {
   return {
     uptime: n(m?.uptime),
     cpuUsage: n(m?.cpuUsage),
+    cpuTemp: n(m?.cpuTemp),
     memUsed: n(m?.memUsed),
     memPercent: n(m?.memPercent),
     swapUsed: n(m?.swapUsed),
@@ -590,8 +597,8 @@ export async function saveReport(
     await pool.query(
       `INSERT INTO metrics_history
          (node_id, ts, cpu, mem_pct, disk_pct, net_up, net_down, disk_r, disk_w,
-          procs, tcp, mem_used, swap_used)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+          procs, tcp, mem_used, swap_used, cpu_temp)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
       [
         id,
         now,
@@ -606,6 +613,7 @@ export async function saveReport(
         safeMetrics.tcpConns,
         safeMetrics.memUsed,
         safeMetrics.swapUsed,
+        safeMetrics.cpuTemp ?? 0,
       ]
     );
   }
@@ -793,6 +801,7 @@ export interface HistoryPoint {
   tcp: number;
   memUsed: number;
   swapUsed: number;
+  cpuTemp: number;
 }
 
 // Public callers (guests on a public dashboard) receive the opaque (encrypted)
@@ -836,7 +845,7 @@ export async function getHistory(
   if (noWindow) {
     const { rows } = await getPool().query(
       `SELECT ts, cpu, mem_pct, disk_pct, net_up, net_down, disk_r, disk_w,
-              procs, tcp, mem_used, swap_used
+              procs, tcp, mem_used, swap_used, cpu_temp
          FROM metrics_history
         WHERE node_id = $1
         ORDER BY ts DESC
@@ -857,6 +866,7 @@ export async function getHistory(
         tcp: Number(r.tcp),
         memUsed: Number(r.mem_used),
         swapUsed: Number(r.swap_used),
+        cpuTemp: Number(r.cpu_temp) || 0,
       }))
       .reverse();
   }
@@ -878,7 +888,8 @@ export async function getHistory(
             AVG(procs)::float8     AS procs,
             AVG(tcp)::float8       AS tcp,
             AVG(mem_used)::float8  AS mem_used,
-            AVG(swap_used)::float8 AS swap_used
+            AVG(swap_used)::float8 AS swap_used,
+            AVG(cpu_temp)::float8  AS cpu_temp
        FROM metrics_history
       WHERE node_id = $1 AND ts >= $2
       GROUP BY bucket_ts
@@ -899,6 +910,7 @@ export async function getHistory(
     tcp: Number(r.tcp),
     memUsed: Number(r.mem_used),
     swapUsed: Number(r.swap_used),
+    cpuTemp: Number(r.cpu_temp) || 0,
   }));
 }
 

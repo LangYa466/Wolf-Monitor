@@ -169,6 +169,8 @@ export default function ServerDetail({
   const ts = points.map((p) => p.ts);
   const procFmt = (v: number) => String(Math.round(v));
   const cpu = points.map((p) => p.cpu);
+  const cpuTemp = points.map((p) => p.cpuTemp ?? 0);
+  const hasTemp = (m.cpuTemp ?? 0) > 0 || cpuTemp.some((v) => v > 0);
   const procs = points.map((p) => p.procs);
   const disk = points.map((p) => p.diskPct);
   const mem = points.map((p) => p.memPct);
@@ -181,6 +183,10 @@ export default function ServerDetail({
 
   const procsMax = niceMax(Math.max(m.procs, ...procs, 1));
   const tcpMax = niceMax(Math.max(m.tcpConns, ...tcp, 1));
+  const tempCurrent = m.cpuTemp ?? 0;
+  const tempPeak = Math.max(tempCurrent, ...cpuTemp);
+  const tempMax = niceMax(Math.max(tempPeak, 60));
+  const tempFmt = (v: number) => `${v.toFixed(1)}°C`;
 
   const cpuChart = (
     <MetricChart
@@ -245,6 +251,18 @@ export default function ServerDetail({
       ]}
       max={100}
       yLabels={["100%", "50%", "0%"]}
+      xLeft={xLabel}
+      timestamps={ts}
+    />
+  );
+  const tempChart = (
+    <MetricChart
+      id="c-temp"
+      title={t("chCpuTemp")}
+      legend={<span className="text-foreground">{tempFmt(tempCurrent)}</span>}
+      series={[{ data: cpuTemp, color: C.maroon, area: true, name: t("chCpuTemp"), format: tempFmt }]}
+      max={tempMax}
+      yLabels={[tempFmt(tempMax), tempFmt(tempMax / 2), "0°C"]}
       xLeft={xLabel}
       timestamps={ts}
     />
@@ -347,6 +365,7 @@ export default function ServerDetail({
             <Field label={t("load")}>
               {m.load1.toFixed(2)} / {m.load5.toFixed(2)} / {m.load15.toFixed(2)}
             </Field>
+            <Field label={t("virt")}>{virtLabel(host, t("virtBareMetal"))}</Field>
             <Field label={t("totalUp")}>{ibytes(m.netSent)}</Field>
             <Field label={t("totalDown")}>{ibytes(m.netRecv)}</Field>
             <Field label={t("bootTime")} className="col-span-2 lg:col-span-1">
@@ -426,6 +445,7 @@ export default function ServerDetail({
           {cpuChart}
           {diskChart}
           {memChart}
+          {hasTemp && tempChart}
         </div>
       ) : (
         <div className="space-y-3">
@@ -616,6 +636,34 @@ function NodeLatencyHistory({
       </div>
     </div>
   );
+}
+
+// virtLabel picks a human-friendly name for the hypervisor the agent detected.
+// The agent forwards systemd-detect-virt's raw token (kvm/vmware/xen/…); we
+// map the common ones to a nicer display and fall back to the uppercased
+// token so novel hypervisors still show something readable. Empty string on
+// bare metal — the caller substitutes the localized "Bare metal" label.
+function virtLabel(host: HostInfo, bareMetalLabel: string): string {
+  const v = host.virtualization?.trim().toLowerCase() ?? "";
+  if (!v || v === "none") return bareMetalLabel;
+  const pretty: Record<string, string> = {
+    kvm: "KVM",
+    qemu: "QEMU",
+    vmware: "VMware",
+    xen: "Xen",
+    hyperv: "Hyper-V",
+    "microsoft-hyperv": "Hyper-V",
+    virtualbox: "VirtualBox",
+    "oracle-virtualbox": "VirtualBox",
+    docker: "Docker",
+    lxc: "LXC",
+    "lxc-libvirt": "LXC",
+    openvz: "OpenVZ",
+    "linux-vserver": "Linux-VServer",
+    "amazon-nitro": "AWS Nitro",
+    "google-cloud": "GCE",
+  };
+  return pretty[v] ?? v.toUpperCase();
 }
 
 // OsBadge shows the concrete distribution (Ubuntu / Debian / …) with its logo

@@ -26,6 +26,12 @@ type HostInfo struct {
 	// AgentVersion is the build version of this binary, reported up so the
 	// master can show version drift and route the self-update directive.
 	AgentVersion string `json:"agentVersion"`
+	// Virtualization is what the node is running on — e.g. "kvm", "vmware",
+	// "xen", "docker", "lxc", "hyperv", "virtualbox". Empty when the host
+	// looks like bare metal (systemd-detect-virt returned nothing). VirtRole
+	// is "guest" or "host" (or empty).
+	Virtualization string `json:"virtualization"`
+	VirtRole       string `json:"virtRole"`
 }
 
 // Metrics is the live, fast-changing sample.
@@ -33,6 +39,10 @@ type Metrics struct {
 	Uptime uint64 `json:"uptime"` // seconds
 
 	CPUUsage float64 `json:"cpuUsage"` // 0..100 overall
+	// CPUTemp is the best-guess CPU package temperature in °C. 0 when the
+	// platform doesn't expose a usable sensor (Windows without WMI perms,
+	// most cloud VMs, minimal containers).
+	CPUTemp float64 `json:"cpuTemp"`
 
 	MemUsed    uint64  `json:"memUsed"`
 	MemPercent float64 `json:"memPercent"`

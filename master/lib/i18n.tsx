@@ -97,6 +97,8 @@ const zhHant: Dict = {
   load: "Load",
   bootTime: "啟動時間",
   lastReport: "最後上報時間",
+  virt: "虛擬化",
+  virtBareMetal: "獨立主機",
 
   // detail tabs / charts
   tabDetail: "詳細資訊",
@@ -106,6 +108,7 @@ const zhHant: Dict = {
   chProcesses: "進程數",
   chDisk: "磁盤",
   chMemSwap: "內存 / Swap",
+  chCpuTemp: "CPU 溫度",
   chUpDown: "上傳 / 下載",
   chBandwidth: "網路頻寬用量",
   chTcp: "TCP 連線",
@@ -314,6 +317,8 @@ const en: Dict = {
   load: "Load",
   bootTime: "Boot time",
   lastReport: "Last report",
+  virt: "Virtualization",
+  virtBareMetal: "Bare metal",
 
   tabDetail: "Details",
   tabNetwork: "Network",
@@ -322,6 +327,7 @@ const en: Dict = {
   chProcesses: "Processes",
   chDisk: "Disk",
   chMemSwap: "Memory / Swap",
+  chCpuTemp: "CPU Temperature",
   chUpDown: "Up / Down",
   chBandwidth: "Network Bandwidth Usage",
   chTcp: "TCP conns",

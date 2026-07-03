@@ -17,11 +17,19 @@ export interface HostInfo {
   // their build version so the admin UI can show fleet-wide drift and the
   // desiredAgentVersion directive can pick the right targets.
   agentVersion?: string;
+  // Virtualization type reported by the agent — "" (bare metal) or a
+  // hypervisor name like "kvm" / "vmware" / "xen" / "docker" / "lxc".
+  // Optional so older node binaries that don't set it still deserialize.
+  virtualization?: string;
+  virtRole?: string; // "guest" | "host" | ""
 }
 
 export interface Metrics {
   uptime: number;
   cpuUsage: number;
+  // CPU package temperature in °C, or 0 when the platform doesn't expose a
+  // usable sensor (most cloud VMs, containers, Windows without WMI).
+  cpuTemp?: number;
   memUsed: number;
   memPercent: number;
   swapUsed: number;
