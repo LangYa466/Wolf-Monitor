@@ -43,6 +43,7 @@ function sanitizeHost(h: any): Report["host"] | null {
   const strFields: Array<[string, number]> = [
     ["os", 64], ["platform", 64], ["platformVersion", 64],
     ["arch", 32], ["cpuModel", 128], ["agentVersion", 64],
+    ["virtualization", 32], ["virtRole", 16],
   ];
   for (const [k, max] of strFields) {
     if (h[k] === undefined || h[k] === null) continue;
@@ -69,6 +70,12 @@ function sanitizeMetrics(m: any, host: any): Report["metrics"] | null {
     Math.min(hi, Math.max(lo, v));
   const SAFE = Number.MAX_SAFE_INTEGER;
   const pctKeys = ["cpuUsage", "memPercent", "diskPercent"] as const;
+  // CPU temperature is optional (bare metal only) and reported in °C. Clamp
+  // [0, 150] to reject sensor glitches; 0 means "no sensor available" and the
+  // UI hides the chart when the whole window reads 0.
+  if (m.cpuTemp !== undefined && m.cpuTemp !== null) {
+    if (!isNonNegFinite(m.cpuTemp)) return null;
+  }
   // Counters / gauges accepted with [0, SAFE] clamp. Includes cumulative
   // totals (uptime, netSent/Recv, diskUsed, diskReadBytes, diskWriteBytes)
   // and instantaneous values that were missing from the v1.5.6 allowlist —
@@ -94,6 +101,9 @@ function sanitizeMetrics(m: any, host: any): Report["metrics"] | null {
   out.procs = Math.trunc(out.procs);
   out.tcpConns = Math.trunc(out.tcpConns);
   out.uptime = Math.trunc(out.uptime);
+  if (m.cpuTemp !== undefined && m.cpuTemp !== null) {
+    out.cpuTemp = Math.min(150, m.cpuTemp);
+  }
   if (isNonNegFinite(host?.memTotal)) out.memUsed = clamp(out.memUsed, 0, host.memTotal);
   if (isNonNegFinite(host?.swapTotal)) out.swapUsed = clamp(out.swapUsed, 0, host.swapTotal);
   if (isNonNegFinite(host?.diskTotal)) out.diskUsed = clamp(out.diskUsed, 0, host.diskTotal);
