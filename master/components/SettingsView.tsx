@@ -953,7 +953,12 @@ function AlertRules({ nodes }: { nodes: NodeView[] }) {
     } else setMsg(t("msgFailed"));
   }
   async function remove(id: string) {
-    if ((await api(`/api/alerts/${id}`, "DELETE")).ok) load();
+    if ((await api(`/api/alerts/${id}`, "DELETE")).ok) {
+      // If the row being edited is deleted, clear the form so we don't
+      // "save" it back on the next click.
+      if (form.id === id) setForm(blankRule());
+      load();
+    }
   }
   // Mirror PingTasks' label: "X selected" / "X excluded" / "All servers".
   const targetsLabel = (r: AlertRule): string => {
@@ -989,7 +994,10 @@ function AlertRules({ nodes }: { nodes: NodeView[] }) {
                 <TableCell className="max-w-[160px] truncate text-muted-foreground" title={r.targets.join(", ")}>{targetsLabel(r)}</TableCell>
                 <TableCell><OnOff on={r.enabled} /></TableCell>
                 <TableCell>
-                  <Button variant="ghost" size="sm" className="h-7 px-2 text-destructive [&_svg]:size-4" onClick={() => remove(r.id)}><Trash2 /></Button>
+                  <div className="flex justify-end gap-0.5">
+                    <Button variant="ghost" size="sm" className="h-7 px-2 [&_svg]:size-4" aria-label={t("edit")} title={t("edit")} onClick={() => setForm({ ...r })}><Pencil /></Button>
+                    <Button variant="ghost" size="sm" className="h-7 px-2 text-destructive [&_svg]:size-4" aria-label={t("clearSel")} onClick={() => remove(r.id)}><Trash2 /></Button>
+                  </div>
                 </TableCell>
               </TableRow>
             ))}
@@ -1023,7 +1031,16 @@ function AlertRules({ nodes }: { nodes: NodeView[] }) {
             onChange={(ids) => setForm({ ...form, targets: ids })}
             onExcludeChange={(b) => setForm({ ...form, exclude: b })}
           />
-          <Button onClick={submit}>{t("add")}</Button>
+          <label className="flex cursor-pointer items-center gap-2 text-sm">
+            <Switch checked={form.enabled ?? true} onCheckedChange={(v) => setForm({ ...form, enabled: v })} />
+            {t("thOn")}
+          </label>
+          <Button onClick={submit}>{form.id ? t("save") : t("add")}</Button>
+          {form.id && (
+            <Button variant="outline" onClick={() => { setForm(blankRule()); setMsg(""); }}>
+              {t("cancel")}
+            </Button>
+          )}
         </div>
         {msg && <p className="text-sm text-destructive">{msg}</p>}
       </CardContent>
@@ -1033,9 +1050,31 @@ function AlertRules({ nodes }: { nodes: NodeView[] }) {
 
 // ── Offline settings ────────────────────────────────────────────────────────
 
+// Bulk offline-config form. Not stored as a "rule" (the backend keeps a per-
+// node row keyed by nodeId), just an ergonomic way to apply the same
+// enabled/grace to several nodes at once and to edit an existing row by
+// loading it into the form. exclude=true means "apply to every node EXCEPT
+// the ones selected", matching the semantics of AlertRule.exclude /
+// PingTask.exclude so the mental model stays consistent across tabs.
+type OfflineForm = {
+  nodeIds: string[];
+  exclude: boolean;
+  enabled: boolean;
+  graceSeconds: number;
+  // When set, the form is editing this single node's row — Apply upserts one
+  // row and the Cancel button resets to a fresh multi-select form.
+  editingNodeId: string | null;
+};
+
+function blankOfflineForm(): OfflineForm {
+  return { nodeIds: [], exclude: false, enabled: true, graceSeconds: 180, editingNodeId: null };
+}
+
 function OfflineSettings({ nodes }: { nodes: NodeView[] }) {
   const { t } = useI18n();
   const [settings, setSettings] = useState<OfflineSetting[]>([]);
+  const [form, setForm] = useState<OfflineForm>(blankOfflineForm());
+  const [msg, setMsg] = useState("");
 
   const load = useCallback(() => {
     fetch("/api/offline")
@@ -1051,9 +1090,58 @@ function OfflineSettings({ nodes }: { nodes: NodeView[] }) {
     const n = nodes.find((x) => x.id === id);
     return n?.name?.trim() || id;
   };
+  // Same label helper the AlertRules table uses, so "N selected / N excluded /
+  // all servers" reads the same across both settings tabs.
+  const targetsLabel = (): string => {
+    if (form.editingNodeId) return labelOf(form.editingNodeId);
+    if (form.nodeIds.length === 0) return form.exclude ? t("all") : t("all");
+    return form.exclude ? t("selExclude", { n: form.nodeIds.length }) : t("selCount", { n: form.nodeIds.length });
+  };
 
-  async function save(nodeId: string, enabled: boolean, graceSeconds: number) {
-    if ((await api("/api/offline", "POST", { nodeId, enabled, graceSeconds })).ok) load();
+  function resolveTargets(): string[] {
+    if (form.editingNodeId) return [form.editingNodeId];
+    const all = nodes.map((n) => n.id);
+    const set = new Set(form.nodeIds);
+    if (form.exclude) return all.filter((id) => !set.has(id));
+    // Empty allowlist = apply to every node, mirroring alert rules.
+    if (form.nodeIds.length === 0) return all;
+    return all.filter((id) => set.has(id));
+  }
+
+  async function apply() {
+    const targets = resolveTargets();
+    if (targets.length === 0) {
+      setMsg(t("msgFailed"));
+      return;
+    }
+    const results = await Promise.all(
+      targets.map((nodeId) =>
+        api("/api/offline", "POST", {
+          nodeId,
+          enabled: form.enabled,
+          graceSeconds: form.graceSeconds,
+        }),
+      ),
+    );
+    if (results.every((r) => r.ok)) {
+      setForm(blankOfflineForm());
+      setMsg(t("msgSaved"));
+      load();
+    } else {
+      setMsg(t("msgFailed"));
+      load();
+    }
+  }
+
+  function startEdit(s: OfflineSetting) {
+    setForm({
+      nodeIds: [s.nodeId],
+      exclude: false,
+      enabled: s.enabled,
+      graceSeconds: s.graceSeconds,
+      editingNodeId: s.nodeId,
+    });
+    setMsg("");
   }
 
   return (
@@ -1062,7 +1150,7 @@ function OfflineSettings({ nodes }: { nodes: NodeView[] }) {
         <CardTitle>{t("secOffline")}</CardTitle>
         <CardDescription>{t("secOfflineDesc")}</CardDescription>
       </CardHeader>
-      <CardContent>
+      <CardContent className="space-y-4">
         <Table>
           <TableHeader>
             <TableRow>
@@ -1070,29 +1158,75 @@ function OfflineSettings({ nodes }: { nodes: NodeView[] }) {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {rows.map((s) => <OfflineRow key={s.nodeId} setting={s} label={labelOf(s.nodeId)} onSave={save} />)}
+            {rows.map((s) => (
+              <TableRow key={s.nodeId}>
+                <TableCell className="font-medium" title={s.nodeId}>{labelOf(s.nodeId)}</TableCell>
+                <TableCell><OnOff on={s.enabled} /></TableCell>
+                <TableCell className="tabular-nums">{s.graceSeconds}s</TableCell>
+                <TableCell>{s.offline ? <Badge variant="destructive">{t("stOffline")}</Badge> : <Badge variant="success">{t("stOnline")}</Badge>}</TableCell>
+                <TableCell>
+                  <div className="flex justify-end gap-0.5">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 px-2 [&_svg]:size-4"
+                      aria-label={t("edit")}
+                      title={t("edit")}
+                      onClick={() => startEdit(s)}
+                    >
+                      <Pencil />
+                    </Button>
+                  </div>
+                </TableCell>
+              </TableRow>
+            ))}
             {rows.length === 0 && (
               <TableRow><TableCell colSpan={5} className="text-muted-foreground">{t("noServersYet")}</TableCell></TableRow>
             )}
           </TableBody>
         </Table>
+
+        <div className="flex flex-wrap items-center gap-2">
+          {form.editingNodeId ? (
+            // Show which node is being edited as a static badge; the multi-
+            // select would be confusing here since save affects exactly one row.
+            <span
+              className="inline-flex h-8 items-center rounded-md border border-border bg-muted/40 px-3 text-sm text-foreground"
+              title={form.editingNodeId}
+            >
+              {targetsLabel()}
+            </span>
+          ) : (
+            <NodeMultiSelect
+              className="w-56"
+              nodes={nodes}
+              value={form.nodeIds}
+              exclude={form.exclude}
+              onChange={(ids) => setForm({ ...form, nodeIds: ids })}
+              onExcludeChange={(b) => setForm({ ...form, exclude: b })}
+            />
+          )}
+          <Input
+            className="w-24"
+            type="number"
+            placeholder="180"
+            value={form.graceSeconds}
+            onChange={(e) => setForm({ ...form, graceSeconds: Number(e.target.value) })}
+          />
+          <label className="flex cursor-pointer items-center gap-2 text-sm">
+            <Switch checked={form.enabled} onCheckedChange={(v) => setForm({ ...form, enabled: v })} />
+            {t("thOn")}
+          </label>
+          <Button onClick={apply}>{form.editingNodeId ? t("save") : t("add")}</Button>
+          {form.editingNodeId && (
+            <Button variant="outline" onClick={() => { setForm(blankOfflineForm()); setMsg(""); }}>
+              {t("cancel")}
+            </Button>
+          )}
+        </div>
+        {msg && <p className="text-sm text-muted-foreground">{msg}</p>}
       </CardContent>
     </Card>
-  );
-}
-
-function OfflineRow({ setting, label, onSave }: { setting: OfflineSetting; label: string; onSave: (id: string, enabled: boolean, grace: number) => void }) {
-  const { t } = useI18n();
-  const [enabled, setEnabled] = useState(setting.enabled);
-  const [grace, setGrace] = useState(setting.graceSeconds);
-  return (
-    <TableRow>
-      <TableCell className="font-medium" title={setting.nodeId}>{label}</TableCell>
-      <TableCell><Switch checked={enabled} onCheckedChange={setEnabled} /></TableCell>
-      <TableCell><Input className="w-24" type="number" value={grace} onChange={(e) => setGrace(Number(e.target.value))} /></TableCell>
-      <TableCell>{setting.offline ? <Badge variant="destructive">{t("stOffline")}</Badge> : <Badge variant="success">{t("stOnline")}</Badge>}</TableCell>
-      <TableCell><Button variant="outline" size="sm" onClick={() => onSave(setting.nodeId, enabled, grace)}>{t("save")}</Button></TableCell>
-    </TableRow>
   );
 }
 
