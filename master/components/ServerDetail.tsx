@@ -662,6 +662,12 @@ function virtLabel(host: HostInfo, bareMetalLabel: string): string {
     "linux-vserver": "Linux-VServer",
     "amazon-nitro": "AWS Nitro",
     "google-cloud": "GCE",
+    "tencent-cloud": "腾讯云 CVM",
+    "alibaba-cloud": "阿里云 ECS",
+    "huawei-cloud": "华为云 ECS",
+    "oracle-cloud": "OCI",
+    vm: "VM",
+    parallels: "Parallels",
   };
   return pretty[v] ?? v.toUpperCase();
 }

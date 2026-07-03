@@ -31,6 +31,14 @@ func detectVirtLinux(gotSystem, gotRole string) (string, string) {
 		return "google-cloud", "guest"
 	case strings.Contains(vendor, "digitalocean"):
 		return "kvm", "guest"
+	case strings.Contains(vendor, "tencent") || strings.Contains(product, "cvm"):
+		return "tencent-cloud", "guest"
+	case strings.Contains(vendor, "alibaba") || strings.Contains(vendor, "aliyun"):
+		return "alibaba-cloud", "guest"
+	case strings.Contains(vendor, "huawei"):
+		return "huawei-cloud", "guest"
+	case strings.Contains(vendor, "oracle"):
+		return "oracle-cloud", "guest"
 	case strings.Contains(vendor, "microsoft"):
 		return "hyperv", "guest"
 	case strings.Contains(vendor, "vmware") || strings.Contains(product, "vmware"):
@@ -45,6 +53,17 @@ func detectVirtLinux(gotSystem, gotRole string) (string, string) {
 		return "xen", "guest"
 	case strings.Contains(vendor, "parallels"):
 		return "parallels", "guest"
+	}
+
+	// virtio_* modules loaded is a near-certain signal that we're a KVM/QEMU
+	// guest (paravirt drivers only make sense on a virtualised host). This
+	// catches boxes where the DMI vendor is a rebranded cloud we didn't list.
+	if b, err := os.ReadFile("/proc/modules"); err == nil {
+		s := string(b)
+		if strings.Contains(s, "virtio_net") || strings.Contains(s, "virtio_blk") ||
+			strings.Contains(s, "virtio_pci") || strings.Contains(s, "virtio_balloon") {
+			return "kvm", "guest"
+		}
 	}
 
 	// Fallback: the CPUID hypervisor bit is set inside every mainstream
