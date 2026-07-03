@@ -1,7 +1,9 @@
 package pinger
 
 import (
+	"context"
 	"log"
+	"net/http"
 	"os/exec"
 	"regexp"
 	"runtime"
@@ -9,6 +11,11 @@ import (
 	"strings"
 	"time"
 )
+
+// ghfastProxy is the mirror the auto-fallback wraps GitHub URLs through when
+// direct GitHub is unreachable. Kept in sync with the CN_DEFAULT_PROXY
+// constant in master/components/SettingsView.tsx.
+const ghfastProxy = "https://ghfast.top"
 
 // updateCooldown bounds how often a node will re-attempt a self-update. If
 // install.sh fails (network blip, GitHub asset not ready, checksum mismatch)
@@ -62,8 +69,18 @@ func (r *Runner) maybeSelfUpdate(desired string) {
 		tag = "v" + tag
 	}
 
+	// If direct GitHub is unreachable (mainland China networks routinely block
+	// raw.githubusercontent.com AND github.com/releases), wrap the bootstrap
+	// URL and pass -p to install.sh so its own binary+SHA256SUMS downloads go
+	// through the same mirror. Probe is best-effort with a tight timeout so
+	// the update path stays snappy on nodes that CAN reach GitHub.
+	proxy := pickBootstrapProxy()
+	if proxy != "" {
+		log.Printf("[update] direct GitHub unreachable — routing self-update through %s", proxy)
+	}
+
 	log.Printf("[update] master wants %s, have %s — running install.sh", tag, r.ownVersion)
-	if err := runInstallScript(r.masterArg, r.token, tag, r.transport, r.interval); err != nil {
+	if err := runInstallScript(r.masterArg, r.token, tag, r.transport, r.interval, proxy); err != nil {
 		// install.sh exits non-zero on download/checksum/systemd failure. We
 		// fall through and keep running the old binary; the next refresh
 		// after `updateCooldown` will retry.
@@ -71,6 +88,32 @@ func (r *Runner) maybeSelfUpdate(desired string) {
 	}
 	// If install.sh succeeded it restarted the systemd unit which killed
 	// this process. If we're still here, the install failed — keep serving.
+}
+
+// pickBootstrapProxy probes whether raw.githubusercontent.com is reachable
+// from this host. If not (mainland-CN networks routinely block it), returns
+// ghfast.top so the self-updater can wrap both the bootstrap fetch and the
+// binary+SHA256SUMS downloads through the mirror. Returns "" when direct
+// GitHub works — no mirror means install.sh keeps its clean trust anchor
+// (checksum manifest fetched via github.com), which is the strong default.
+func pickBootstrapProxy() string {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodHead,
+		"https://raw.githubusercontent.com/LangYa466/Wolf-Monitor/main/node/install.sh", nil)
+	if err != nil {
+		return ""
+	}
+	client := &http.Client{Timeout: 3 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return ghfastProxy
+	}
+	resp.Body.Close()
+	if resp.StatusCode >= 500 {
+		return ghfastProxy
+	}
+	return ""
 }
 
 // runInstallScript launches install.sh in a DETACHED systemd transient unit
@@ -86,7 +129,7 @@ func (r *Runner) maybeSelfUpdate(desired string) {
 //
 // Inputs flow through systemd-run's argv (-- ... ARG ARG) and bash's $1/$2/$3,
 // so a token like `; rm -rf /` stays a literal positional arg the whole way.
-func runInstallScript(master, token, version, transport string, interval int) error {
+func runInstallScript(master, token, version, transport string, interval int, proxy string) error {
 	if transport == "" {
 		transport = "ws"
 	}
@@ -94,17 +137,31 @@ func runInstallScript(master, token, version, transport string, interval int) er
 		interval = 3
 	}
 	intervalStr := strconv.Itoa(interval)
+	// The script accepts up to 6 positional args; $6 is the optional GitHub
+	// proxy. When set, both the bootstrap fetch of install.sh AND install.sh's
+	// own binary/SHA256SUMS downloads go through it (install.sh receives -p).
+	// When empty, neither is proxied — same behaviour as before.
 	const script = `set -e
-url="https://raw.githubusercontent.com/LangYa466/Wolf-Monitor/main/node/install.sh"
-if command -v curl >/dev/null 2>&1; then
-  bash <(curl -fsSL --max-time 60 "$url") -e "$1" -t "$2" -V "$3" -T "$4" -i "$5"
+raw="https://raw.githubusercontent.com/LangYa466/Wolf-Monitor/main/node/install.sh"
+PROXY="$6"
+if [ -n "$PROXY" ]; then
+  url="${PROXY%/}/$raw"
 else
-  bash <(wget -qO- --timeout=60 "$url") -e "$1" -t "$2" -V "$3" -T "$4" -i "$5"
+  url="$raw"
+fi
+ARGS=(-e "$1" -t "$2" -V "$3" -T "$4" -i "$5")
+if [ -n "$PROXY" ]; then
+  ARGS+=(-p "$PROXY")
+fi
+if command -v curl >/dev/null 2>&1; then
+  bash <(curl -fsSL --max-time 60 "$url") "${ARGS[@]}"
+else
+  bash <(wget -qO- --timeout=60 "$url") "${ARGS[@]}"
 fi`
 	// Try systemd-run first (always present on a systemd host). Falls back
 	// to plain setsid for non-systemd setups even though install.sh wouldn't
 	// work there — at least the helper survives the wolf-node SIGTERM.
-	args := []string{"-c", script, "wolf-update", master, token, version, transport, intervalStr}
+	args := []string{"-c", script, "wolf-update", master, token, version, transport, intervalStr, proxy}
 	if path, err := exec.LookPath("systemd-run"); err == nil {
 		full := append([]string{
 			"--collect", "--no-block",

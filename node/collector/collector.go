@@ -66,8 +66,7 @@ func (c *Collector) Host() HostInfo {
 		// host.Info already probes virtualization on Linux (systemd-detect-virt
 		// / dmi vendor / cgroup markers). Empty string == bare metal; anything
 		// else is a hypervisor name like "kvm", "vmware", "xen", "docker", "lxc".
-		hi.Virtualization = info.VirtualizationSystem
-		hi.VirtRole = info.VirtualizationRole
+		hi.Virtualization, hi.VirtRole = detectVirtLinux(info.VirtualizationSystem, info.VirtualizationRole)
 	}
 	if vm, err := mem.VirtualMemory(); err == nil {
 		hi.MemTotal = vm.Total
