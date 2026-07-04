@@ -2,6 +2,7 @@ import { ensureSchema, getPool, OFFLINE_AFTER_MS, pruneHistory, writeAudit } fro
 import { pruneAuthAttempts } from "./auth";
 import { notify } from "./notify";
 import { isPrivate } from "./net";
+import { isIpLiteral } from "./ipcheck";
 import type {
   AlertMetric,
   AlertRule,
@@ -53,7 +54,7 @@ function validatePingTarget(raw: string, type: PingType): string {
     lower === "0.0.0.0" ||
     lower === "::" ||
     lower === "::0" ||
-    isPrivate(host)
+    (isIpLiteral(host) && isPrivate(host))
   ) {
     throw new Error("internal/private targets are not allowed");
   }
