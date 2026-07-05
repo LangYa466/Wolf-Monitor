@@ -527,13 +527,17 @@ export async function evaluate(): Promise<EvalSummary> {
   const pool = getPool();
   const now = Date.now();
 
-  // Current node list (id + last_seen) for both checks.
+  // Current node list (id + last_seen + admin display name) for both checks.
+  // `name` is the operator-set 备注; notifications prefer it over the raw
+  // hostname so alerts read as "Akile TW" instead of "hkl-tw1-…af6b70".
   const { rows: nodeRows } = await pool.query<{
     id: string;
+    name: string | null;
     last_seen: string;
-  }>(`SELECT id, last_seen FROM nodes`);
+  }>(`SELECT id, name, last_seen FROM nodes`);
   const nodes = nodeRows.map((r) => ({
     id: r.id,
+    name: r.name,
     lastSeen: Number(r.last_seen),
   }));
 
@@ -543,7 +547,7 @@ export async function evaluate(): Promise<EvalSummary> {
 }
 
 async function evaluateLoadAlerts(
-  nodes: { id: string; lastSeen: number }[],
+  nodes: { id: string; name: string | null; lastSeen: number }[],
   now: number,
   summary: EvalSummary
 ) {
@@ -618,14 +622,14 @@ async function evaluateLoadAlerts(
             await notify(
               "alert",
               rule.name,
-              node.id,
+              node.name || node.id,
               `${rule.metric.toUpperCase()} ≥ ${rule.threshold}% for ${(fraction * 100).toFixed(0)}% of the last ${rule.windowMinutes}m (threshold ${(rule.ratio * 100).toFixed(0)}%).`,
             );
             summary.alertsFired++;
           }
           upserts.push({ nodeId: node.id, firing: true, lastNotified: due ? now : lastNotified });
         } else if (wasFiring) {
-          await notify("recovery", rule.name, node.id, `${rule.metric.toUpperCase()} back to normal.`);
+          await notify("recovery", rule.name, node.name || node.id, `${rule.metric.toUpperCase()} back to normal.`);
           summary.recoveries++;
           upserts.push({ nodeId: node.id, firing: false, lastNotified: now });
         }
@@ -656,7 +660,7 @@ async function evaluateLoadAlerts(
 }
 
 async function evaluateOffline(
-  nodes: { id: string; lastSeen: number }[],
+  nodes: { id: string; name: string | null; lastSeen: number }[],
   now: number,
   summary: EvalSummary
 ) {
@@ -667,18 +671,19 @@ async function evaluateOffline(
     const s = byId.get(node.id);
     if (!s || !s.enabled) continue;
     const isOffline = now - node.lastSeen > s.graceSeconds * 1000;
+    const display = node.name || node.id;
 
     if (isOffline && !s.offline) {
       await notify(
         "offline",
         "Offline",
-        node.id,
+        display,
         `No report for ${Math.round((now - node.lastSeen) / 1000)}s (grace ${s.graceSeconds}s).`
       );
       summary.offline++;
       await setOfflineState(node.id, true, now);
     } else if (!isOffline && s.offline) {
-      await notify("online", "Online", node.id, `Reporting again.`);
+      await notify("online", "Online", display, `Reporting again.`);
       summary.online++;
       await setOfflineState(node.id, false, now);
     }
