@@ -10,6 +10,7 @@ import {
 import { ensureSchema } from "@/lib/db";
 import { clientIp } from "@/lib/net";
 import { isSecureRequest } from "@/lib/authutil";
+import { verifyTurnstile } from "@/lib/turnstile";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -30,7 +31,7 @@ export async function POST(req: NextRequest) {
     if (len > 4 * 1024) {
       return NextResponse.json({ error: "payload too large" }, { status: 413 });
     }
-    const { email, password } = await req.json();
+    const { email, password, turnstileToken } = await req.json();
     const ip = clientIp(req.headers) ?? "unknown";
 
     if (typeof email !== "string" || typeof password !== "string") {
@@ -39,6 +40,14 @@ export async function POST(req: NextRequest) {
     // Length caps: same 401 as wrong-password to avoid leaking a new oracle.
     if (email.length > 254 || password.length > 256) {
       return NextResponse.json({ error: "invalid email or password" }, { status: 401 });
+    }
+
+    // Turnstile before rate-limit + password so a failed captcha never spends
+    // a rate slot or touches the user row (no oracle for account existence).
+    // No-op when TURNSTILE_SECRET_KEY is unset.
+    const captcha = await verifyTurnstile(turnstileToken, ip === "unknown" ? null : ip);
+    if (!captcha.ok) {
+      return NextResponse.json({ error: captcha.error ?? "captcha failed" }, { status: 400 });
     }
 
     if (await isRateLimited(ip, email)) {

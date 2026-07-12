@@ -12,13 +12,16 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 // proxied behind CF. Allow its script + beacon-submit origin so CSP doesn't
 // block it, which also avoids the hydration mismatch CF causes when the
 // blocked-script <script> stub stays in the served HTML.
+// Cloudflare Turnstile loads its api.js from challenges.cloudflare.com and
+// renders the challenge inside an iframe from the same origin.
 const csp = [
   "default-src 'self'",
-  "script-src 'self' 'unsafe-inline' https://static.cloudflareinsights.com",
+  "script-src 'self' 'unsafe-inline' https://static.cloudflareinsights.com https://challenges.cloudflare.com",
   "style-src 'self' 'unsafe-inline' https://fastly.jsdelivr.net https://fonts.googleapis.com",
   "font-src 'self' data: https://fonts.gstatic.com https://fastly.jsdelivr.net",
   "img-src 'self' data: https://flagcdn.com",
-  "connect-src 'self' https://cloudflareinsights.com",
+  "connect-src 'self' https://cloudflareinsights.com https://challenges.cloudflare.com",
+  "frame-src https://challenges.cloudflare.com",
   "frame-ancestors 'none'",
   "base-uri 'none'",
   "form-action 'self'",
