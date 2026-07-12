@@ -1,6 +1,6 @@
 {
   "name": "wolf-monitor-master",
-  "version": "1.6.6",
+  "version": "1.6.7",
   "private": true,
   "packageManager": "pnpm@11.9.0+sha512.bd682d5d03fe525ef7c9fd6780c6884d1e756ac4c9c9fe00c538782824310dcf90e3ddc4f53835f06dfaebd5085e41855e0bcbb3b60de2ac5bbab89e5036f03b",
   "engines": {
@@ -19,9 +19,9 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "ipaddr.js": "2.4.0",
-    "lru-cache": "11.5.1",
-    "lucide-react": "^1.22.0",
-    "next": "15.5.18",
+    "lru-cache": "11.5.2",
+    "lucide-react": "^1.23.0",
+    "next": "16.2.10",
     "pg": "8.22.0",
     "react": "19.2.7",
     "react-dom": "19.2.7",
@@ -43,7 +43,7 @@
     ]
   },
   "devDependencies": {
-    "@types/node": "^22.19.19",
+    "@types/node": "^26.1.1",
     "@types/pg": "^8.11.10",
     "@types/react": "^19.2.7",
     "@types/react-dom": "^19.0.3",
@@ -53,7 +53,7 @@
     "autoprefixer": "^10.5.2",
     "postcss": "^8.5.16",
     "tailwindcss": "^3.4.17",
-    "tsx": "^4.19.2",
+    "tsx": "^4.23.0",
     "typescript": "^5.7.3"
   }
 }

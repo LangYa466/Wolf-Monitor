@@ -9,7 +9,7 @@ const NODE_PATHS = ["/api/report", "/api/ping", "/api/tasks", "/api/cron"];
 const AUTH_OPEN = ["/api/auth/login", "/api/auth/setup"];
 const MUTATING = new Set(["POST", "PATCH", "PUT", "DELETE"]);
 
-export function middleware(req: NextRequest) {
+export function proxy(req: NextRequest) {
   const { pathname } = req.nextUrl;
   if (!pathname.startsWith("/api/")) return NextResponse.next();
 

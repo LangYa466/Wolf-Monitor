@@ -1,8 +1,4 @@
-import { dirname } from "path";
-import { fileURLToPath } from "url";
 import type { NextConfig } from "next";
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
 
 // Defense-in-depth response headers. CSP allowlists the exact third-party
 // origins used in app/layout.tsx (font-logos + Google Fonts). 'unsafe-inline'
@@ -42,8 +38,8 @@ const nextConfig: NextConfig = {
   // doesn't try to bundle them into serverless/edge function output.
   serverExternalPackages: ["pg", "ws"],
   // This app is the workspace root (the repo also contains node/), so pin the
-  // file-tracing root to this dir — avoids Next inferring the wrong root.
-  outputFileTracingRoot: __dirname,
+  // file-tracing root to CWD (== master/) — avoids Next inferring the wrong root.
+  outputFileTracingRoot: process.cwd(),
   async headers() {
     return [{ source: "/:path*", headers: securityHeaders }];
   },
