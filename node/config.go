@@ -9,9 +9,19 @@ import (
 	"strings"
 )
 
-// Version is the build version reported by -version. Override at link time with
-// -ldflags "-X main.Version=...". Kept in sync with the master's package.json.
-var Version = "1.6.6"
+// Version is the build version reported by -version. Release builds override
+// this at link time via `-ldflags "-X main.Version=$GITHUB_REF_NAME"` in
+// release.yml so the binary self-reports the actual release tag. Local `go
+// build` (no ldflags) falls back to this literal, so keep it bumped in step
+// with master/package.json to avoid version-drift confusion during dev.
+//
+// If this literal drifts BELOW the desiredAgentVersion the master sends,
+// `maybeSelfUpdate` treats every restart as "still needs update" and hammers
+// install.sh in a tight loop (see v1.6.7: hardcoded 1.6.6 + no ldflags meant
+// every self-update produced a binary still reporting 1.6.6, cascading into
+// a 1-install-per-second death loop on every node). Persistent cooldown in
+// pinger/updater.go now caps blast radius even if this happens again.
+var Version = "1.6.8"
 
 // Interval bounds. Floor prevents a busy-loop hammer on the master; ceiling
 // prevents a misconfigured node from going silent for hours.

@@ -26,12 +26,24 @@ jobs:
         working-directory: node
         env:
           CGO_ENABLED: "0"
+          # release-node only runs on `push tags: v*`, so GITHUB_REF_NAME is
+          # the tag ("v1.6.8"). Strip the "v" to match Version's shape (the
+          # updater tolerates both, but keeping the literal untagged avoids
+          # noise in `-version` output).
+          VERSION: ${{ github.ref_name }}
         run: |
           mkdir -p dist
+          # -X main.Version=… injects the tag into node/config.go's Version
+          # at link time. Skipping this in v1.6.7 shipped a binary that self-
+          # reported the source-hardcoded "1.6.6", causing every node that
+          # updated to v1.6.7 to think it *still* needed updating and reinstall
+          # on a ~1s loop. Never remove this without also removing the
+          # `desiredAgentVersion` self-update path.
+          LDFLAGS="-s -w -X main.Version=${VERSION#v}"
           build() {
             local os="$1" arch="$2" ext="$3"
             echo "→ wolf-node_${os}_${arch}${ext}"
-            GOOS="$os" GOARCH="$arch" go build -trimpath -ldflags "-s -w" \
+            GOOS="$os" GOARCH="$arch" go build -trimpath -ldflags "$LDFLAGS" \
               -o "dist/wolf-node_${os}_${arch}${ext}" .
           }
           build linux   amd64 ""

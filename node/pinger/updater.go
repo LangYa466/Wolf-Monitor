@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"runtime"
 	"strconv"
@@ -23,7 +24,47 @@ const ghfastProxy = "https://ghfast.top"
 // we'll retry on the next refresh after this much wall-clock has passed —
 // never sooner. Without this a bad desiredAgentVersion would have the runner
 // burning the binary every 30s.
+//
+// The cooldown is also persisted to disk (see updateStampPath) so that even
+// a *successful* install that produces a binary still reporting the wrong
+// version — v1.6.7's death loop, where a hardcoded literal + missing ldflags
+// meant every fresh install self-reported 1.6.6 and immediately re-triggered
+// — can't spam install.sh faster than this interval.
 const updateCooldown = 5 * time.Minute
+
+// updateStampPath is the on-disk marker used to persist lastUpdateAttempt
+// across process restarts. install.sh's systemd unit grants
+// ReadWritePaths=/opt/wolf, so this location is writable AND survives the
+// binary swap that install.sh performs.
+const updateStampPath = "/opt/wolf/.last-update-attempt"
+
+// readLastUpdateStamp returns the last on-disk update-attempt timestamp,
+// or the zero time if the file is missing / unreadable / malformed. Never
+// returns an error — a missing stamp just means "no attempt recorded yet."
+func readLastUpdateStamp() time.Time {
+	b, err := os.ReadFile(updateStampPath)
+	if err != nil {
+		return time.Time{}
+	}
+	n, err := strconv.ParseInt(strings.TrimSpace(string(b)), 10, 64)
+	if err != nil || n <= 0 {
+		return time.Time{}
+	}
+	return time.Unix(n, 0)
+}
+
+// writeLastUpdateStamp best-effort persists `now` as the last-attempt time.
+// Failures are logged but non-fatal — the in-memory cooldown still applies,
+// so at worst we lose crash-resistance until the next successful write.
+func writeLastUpdateStamp(now time.Time) {
+	if err := os.MkdirAll(filepath.Dir(updateStampPath), 0o755); err != nil {
+		log.Printf("[update] cooldown stamp: mkdir failed: %v", err)
+		return
+	}
+	if err := os.WriteFile(updateStampPath, []byte(strconv.FormatInt(now.Unix(), 10)), 0o644); err != nil {
+		log.Printf("[update] cooldown stamp: write failed: %v", err)
+	}
+}
 
 // Only accept semver-shaped versions from the master. install.sh's -V flag
 // becomes a shell argument; restricting to digits-and-dots + optional leading
@@ -57,10 +98,19 @@ func (r *Runner) maybeSelfUpdate(desired string) {
 		log.Printf("[update] master wants %s but self-update only supports linux (current %s)", desired, runtime.GOOS)
 		return
 	}
-	if time.Since(r.lastUpdateAttempt) < updateCooldown {
+	// Cooldown check uses whichever timestamp is newer between the in-memory
+	// counter (this process) and the on-disk stamp (all previous processes),
+	// so restart-loop scenarios can't bypass it by clearing r.lastUpdateAttempt.
+	lastAttempt := r.lastUpdateAttempt
+	if disk := readLastUpdateStamp(); disk.After(lastAttempt) {
+		lastAttempt = disk
+	}
+	if time.Since(lastAttempt) < updateCooldown {
 		return
 	}
-	r.lastUpdateAttempt = time.Now()
+	now := time.Now()
+	r.lastUpdateAttempt = now
+	writeLastUpdateStamp(now)
 
 	// GitHub release tags use the "v" prefix (release.yml triggers on
 	// `tags: ["v*"]`). install.sh appends -V verbatim to releases/download/,
