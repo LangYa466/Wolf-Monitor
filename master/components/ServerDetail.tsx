@@ -24,6 +24,10 @@ import { SelectMenu } from "@/components/ui/select-menu";
 import type { HostInfo } from "@/lib/types";
 
 const POLL_MS = 3000;
+// Faster poll on the "RealTime" range so the chart tail keeps up with the 5s
+// per-node sample cadence — 3s was noticeably chunky when watching one server.
+const REALTIME_POLL_MS = 1500;
+const REALTIME_WINDOW_MS = 5 * 60 * 1000;
 
 // Chart palette — explicit hsl() literals so they resolve as SVG fill/stroke.
 const C = {
@@ -36,7 +40,7 @@ const C = {
 
 type RangeKey = "realtime" | "4h" | "1d" | "7d" | "30d";
 const RANGES: { key: RangeKey; label: string; windowMs: number; xLabel: string }[] = [
-  { key: "realtime", label: "RealTime", windowMs: 0, xLabel: "" },
+  { key: "realtime", label: "RealTime", windowMs: REALTIME_WINDOW_MS, xLabel: "5m" },
   { key: "4h", label: "4 Hours", windowMs: 4 * 3600_000, xLabel: "4h" },
   { key: "1d", label: "1 Day", windowMs: 24 * 3600_000, xLabel: "1d" },
   { key: "7d", label: "7 Day", windowMs: 7 * 24 * 3600_000, xLabel: "7d" },
@@ -111,8 +115,12 @@ export default function ServerDetail({
   const loadHistory = useCallback(async () => {
     if (!histId) return;
     const r = RANGES.find((x) => x.key === range)!;
+    // RealTime uses a fixed 5min sliding window with one bucket per 5s sample
+    // (60 points). Larger ranges scale limit up for higher fidelity.
     const qs =
-      r.windowMs > 0 ? `?window=${r.windowMs}&limit=2000` : `?limit=120`;
+      range === "realtime"
+        ? `?window=${REALTIME_WINDOW_MS}&limit=60`
+        : `?window=${r.windowMs}&limit=2000`;
     try {
       const res = await fetch(`/api/nodes/${encodeURIComponent(histId)}/history${qs}`, {
         cache: "no-store",
@@ -138,7 +146,7 @@ export default function ServerDetail({
     setPoints([]);
     loadHistory().finally(() => setLoadingHist(false));
     if (range !== "realtime") return;
-    const t = setInterval(loadHistory, POLL_MS);
+    const t = setInterval(loadHistory, REALTIME_POLL_MS);
     return () => clearInterval(t);
   }, [loadHistory, range, histId]);
 
@@ -538,7 +546,10 @@ function NodeLatencyHistory({
 
   const load = useCallback(async () => {
     const r = RANGES.find((x) => x.key === range)!;
-    const qs = r.windowMs > 0 ? `?window=${r.windowMs}&limit=2000` : `?limit=120`;
+    const qs =
+      range === "realtime"
+        ? `?window=${REALTIME_WINDOW_MS}&limit=60`
+        : `?window=${r.windowMs}&limit=2000`;
     try {
       const res = await fetch(
         `/api/nodes/${encodeURIComponent(nodeId)}/latency${qs}`,
@@ -562,7 +573,7 @@ function NodeLatencyHistory({
     setLoading(true);
     load().finally(() => setLoading(false));
     if (range !== "realtime") return;
-    const t = setInterval(load, POLL_MS);
+    const t = setInterval(load, REALTIME_POLL_MS);
     return () => clearInterval(t);
   }, [load, range]);
 
@@ -724,7 +735,7 @@ function rangeXLabel(range: RangeKey, points: HistoryPoint[]): string {
   // right edge would read as a graphing bug. When data fills the window,
   // both numbers agree and the label matches the picker.
   if (points.length < 2) {
-    return range === "realtime" ? "" : RANGES.find((r) => r.key === range)!.xLabel;
+    return RANGES.find((r) => r.key === range)!.xLabel;
   }
   const spanMs = points[points.length - 1].ts - points[0].ts;
   return formatSpan(spanMs);
