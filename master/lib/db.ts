@@ -312,6 +312,9 @@ const SENSITIVE_KEYS = new Set<string>([
   "notify",
   "idCipherKey",
   "idCipherTweak",
+  // URLs frequently carry auth tokens (?token=…) or point to internal
+  // hostnames the operator doesn't want in DB dumps.
+  "httpChecks",
 ]);
 
 interface EncryptedEnvelope {

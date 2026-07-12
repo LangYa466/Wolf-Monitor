@@ -1,6 +1,7 @@
 import { ensureSchema, getPool, OFFLINE_AFTER_MS, pruneHistory, writeAudit } from "./db";
 import { pruneAuthAttempts } from "./auth";
 import { notify } from "./notify";
+import { evaluateHttpChecks } from "./http-check";
 import { isPrivate } from "./net";
 import { isIpLiteral } from "./ipcheck";
 import type {
@@ -543,6 +544,9 @@ export async function evaluate(): Promise<EvalSummary> {
 
   await evaluateLoadAlerts(nodes, now, summary);
   await evaluateOffline(nodes, now, summary);
+  // Piggyback the HTTP liveness checks; failures inside are swallowed so a
+  // slow/blackholed target can't tank the whole eval tick.
+  await evaluateHttpChecks().catch((err) => console.error("evaluateHttpChecks failed", err));
   return summary;
 }
 
