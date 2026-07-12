@@ -241,12 +241,13 @@ export default function SettingsView() {
         {tab === "alerts" && <AlertRules nodes={nodes} />}
         {tab === "offline" && <OfflineSettings nodes={nodes} />}
         {tab === "ping" && <PingTasks nodes={nodes} />}
+        {tab === "http" && <HttpChecks />}
       </div>
     </div>
   );
 }
 
-type SettingsTab = "servers" | "notify" | "alerts" | "offline" | "ping";
+type SettingsTab = "servers" | "notify" | "alerts" | "offline" | "ping" | "http";
 const TAB_KEY = "wolf_settings_tab";
 const TABS: { value: SettingsTab; key: string }[] = [
   { value: "servers", key: "secServers" },
@@ -254,6 +255,7 @@ const TABS: { value: SettingsTab; key: string }[] = [
   { value: "alerts", key: "secAlerts" },
   { value: "offline", key: "secOffline" },
   { value: "ping", key: "secPing" },
+  { value: "http", key: "secHttp" },
 ];
 
 // ── Servers: token, ipinfo, drag reorder ────────────────────────────────────
@@ -1363,4 +1365,114 @@ function blankTask(): Partial<PingTask> {
 }
 function defaultOffline(nodeId: string): OfflineSetting {
   return { nodeId, enabled: true, graceSeconds: 180, lastNotified: null, offline: false };
+}
+
+// ── HTTP checks (admin-only, not exposed on public dashboard) ───────────────
+interface HttpCheckTarget { url: string; intervalSec: number; name?: string }
+interface HttpCheckState { status: "up" | "down" | "unknown"; lastCheckAt: number; lastCode?: number; lastError?: string }
+
+function HttpChecks() {
+  const { t } = useI18n();
+  const [targets, setTargets] = useState<HttpCheckTarget[]>([]);
+  const [state, setState] = useState<Record<string, HttpCheckState>>({});
+  const [form, setForm] = useState({ url: "", intervalSec: 300, name: "" });
+  const [msg, setMsg] = useState("");
+  const [testing, setTesting] = useState<string | null>(null);
+
+  const load = useCallback(() => {
+    fetch("/api/http-checks")
+      .then((r) => (r.ok ? r.json() : { targets: [], state: {} }))
+      .then((d) => { setTargets(d.targets ?? []); setState(d.state ?? {}); })
+      .catch(() => {});
+  }, []);
+  useEffect(load, [load]);
+
+  async function save(next: HttpCheckTarget[]) {
+    const r = await api("/api/http-checks", "POST", { targets: next });
+    setMsg(r.ok ? t("msgSaved") : t("msgFailed"));
+    load();
+  }
+  async function addOrUpdate() {
+    try { new URL(form.url); } catch { setMsg(t("msgFailed")); return; }
+    const iv = Math.max(30, Math.min(86400, Math.round(form.intervalSec) || 300));
+    const clean: HttpCheckTarget = { url: form.url.trim(), intervalSec: iv };
+    if (form.name.trim()) clean.name = form.name.trim();
+    const next = targets.filter((x) => x.url !== clean.url).concat(clean);
+    setForm({ url: "", intervalSec: 300, name: "" });
+    await save(next);
+  }
+  async function remove(url: string) {
+    await save(targets.filter((x) => x.url !== url));
+  }
+  async function test(target: HttpCheckTarget) {
+    setTesting(target.url);
+    const r = await api("/api/http-checks/test", "POST", { url: target.url, name: target.name });
+    setTesting(null);
+    const j = await r.json().catch(() => ({}));
+    setMsg(r.ok ? `${target.name || target.url}: ${j.probe?.ok ? `HTTP ${j.probe.code}` : (j.probe?.code ? `HTTP ${j.probe.code}` : j.probe?.error || "error")} — notify sent` : t("msgFailed"));
+  }
+
+  const statusBadge = (s?: HttpCheckState) => {
+    if (!s || s.status === "unknown") return <Badge variant="outline">—</Badge>;
+    if (s.status === "up") return <Badge variant="success">{s.lastCode ? `HTTP ${s.lastCode}` : "OK"}</Badge>;
+    return <Badge variant="destructive">{s.lastCode ? `HTTP ${s.lastCode}` : "DOWN"}</Badge>;
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>{t("secHttp")}</CardTitle>
+        <CardDescription>{t("secHttpDesc")}</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>URL</TableHead><TableHead>Name</TableHead><TableHead>Interval</TableHead><TableHead>Status</TableHead><TableHead />
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {targets.map((tt) => (
+              <TableRow key={tt.url}>
+                <TableCell className="font-mono text-xs break-all">{tt.url}</TableCell>
+                <TableCell>{tt.name || "—"}</TableCell>
+                <TableCell className="tabular-nums">{tt.intervalSec}s</TableCell>
+                <TableCell>{statusBadge(state[tt.url])}</TableCell>
+                <TableCell>
+                  <div className="flex justify-end gap-0.5">
+                    <Button variant="ghost" size="sm" className="h-7 px-2" disabled={testing === tt.url} onClick={() => test(tt)}>
+                      {testing === tt.url ? "…" : "Test"}
+                    </Button>
+                    <Button variant="ghost" size="sm" className="h-7 px-2 [&_svg]:size-4" aria-label="delete" onClick={() => remove(tt.url)}>
+                      <Trash2 />
+                    </Button>
+                  </div>
+                </TableCell>
+              </TableRow>
+            ))}
+            {targets.length === 0 && (
+              <TableRow><TableCell colSpan={5} className="text-muted-foreground">—</TableCell></TableRow>
+            )}
+          </TableBody>
+        </Table>
+
+        <div className="flex flex-wrap items-end gap-2">
+          <div className="flex-1 min-w-[240px]">
+            <Label className="text-xs text-muted-foreground">URL</Label>
+            <Input value={form.url} onChange={(e) => setForm({ ...form, url: e.target.value })} placeholder="https://example.com/health" />
+          </div>
+          <div className="w-40">
+            <Label className="text-xs text-muted-foreground">Name</Label>
+            <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Blog" />
+          </div>
+          <div className="w-28">
+            <Label className="text-xs text-muted-foreground">Interval (s)</Label>
+            <Input type="number" min={30} max={86400} value={form.intervalSec} onChange={(e) => setForm({ ...form, intervalSec: Number(e.target.value) || 300 })} />
+          </div>
+          <Button onClick={addOrUpdate}>{t("add")}</Button>
+        </div>
+        {msg && <p className="text-xs text-muted-foreground">{msg}</p>}
+      </CardContent>
+    </Card>
+  );
 }
