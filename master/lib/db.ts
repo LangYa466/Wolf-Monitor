@@ -620,6 +620,16 @@ export async function saveReport(
     );
   }
 
+  // First-report bootstrap: ensure an enabled offline_settings row exists so
+  // a freshly-joined node gets offline notifications by default. ON CONFLICT
+  // DO NOTHING preserves any operator edits made later (disable, custom grace).
+  await pool.query(
+    `INSERT INTO offline_settings (node_id, enabled, grace_seconds)
+     VALUES ($1, TRUE, 180)
+     ON CONFLICT (node_id) DO NOTHING`,
+    [id],
+  );
+
   return {
     id,
     opaqueId: await encodeNodeId(Number(rows[0]?.seq ?? 0)),
