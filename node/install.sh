@@ -150,6 +150,14 @@ if [ "$OS" = "linux" ] && command -v systemctl >/dev/null 2>&1; then
 Description=wolf node (探针)
 After=network-online.target
 Wants=network-online.target
+# Wide start-limit window so a bad self-update can't wedge the service into
+# failed state. v1.6.7 shipped a hardcoded-version bug that made install.sh
+# fire ~1/second; systemd's default (5 restarts / 10s) tripped and the unit
+# stayed dead until someone manually reset-failed'd every host. Paired with
+# the updater's 5min on-disk cooldown (pinger/updater.go), a repeat of that
+# bug is now capped at ~1 restart / 5min — well under this ceiling.
+StartLimitIntervalSec=300
+StartLimitBurst=20
 
 [Service]
 ExecStart=${BIN} ${ARGS}
