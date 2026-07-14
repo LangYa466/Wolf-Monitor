@@ -1,0 +1,42 @@
+services:
+  postgres:
+    image: postgres:18-alpine
+    container_name: wolf-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-wolf}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-wolf}
+    volumes:
+      - pg_data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-wolf} -d ${POSTGRES_DB:-wolf}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  master:
+    build:
+      context: ./master
+      args:
+        NEXT_PUBLIC_TURNSTILE_SITE_KEY: ${NEXT_PUBLIC_TURNSTILE_SITE_KEY}
+    image: wolf-master:local
+    container_name: wolf-master
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-wolf}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-wolf}?sslmode=disable
+      WOLF_SECRET_KEY: ${WOLF_SECRET_KEY:?set WOLF_SECRET_KEY (= OLD DATABASE_URL literal) in .env}
+      WOLF_TRUST_PROXY_HEADERS: "1"
+      TRUST_PROXY: ${TRUST_PROXY:-cloudflare,nginx}
+      NEXT_PUBLIC_TURNSTILE_SITE_KEY: ${NEXT_PUBLIC_TURNSTILE_SITE_KEY}
+      TURNSTILE_SECRET_KEY: ${TURNSTILE_SECRET_KEY}
+      PORT: "8080"
+      HOST: 0.0.0.0
+    ports:
+      - "127.0.0.1:8081:8080"
+
+volumes:
+  pg_data:
