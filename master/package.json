@@ -28,7 +28,7 @@
     "request-ip": "3.3.0",
     "tailwind-merge": "^2.6.0",
     "validator": "13.15.35",
-    "ws": "8.21.0"
+    "ws": "8.21.1"
   },
   "overrides": {
     "postcss": "^8.5.10"
