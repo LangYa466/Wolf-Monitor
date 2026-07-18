@@ -21,7 +21,7 @@ import (
 // every self-update produced a binary still reporting 1.6.6, cascading into
 // a 1-install-per-second death loop on every node). Persistent cooldown in
 // pinger/updater.go now caps blast radius even if this happens again.
-var Version = "1.7.1"
+var Version = "1.7.2"
 
 // Interval bounds. Floor prevents a busy-loop hammer on the master; ceiling
 // prevents a misconfigured node from going silent for hours.

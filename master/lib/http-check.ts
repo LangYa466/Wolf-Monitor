@@ -59,13 +59,17 @@ export async function evaluateHttpChecks(): Promise<void> {
   for (const t of cfg.targets) {
     const prev = state[t.url] ?? { status: "unknown" as const, lastCheckAt: 0 };
     if (now - prev.lastCheckAt < t.intervalSec * 1000) continue;
+    const label = t.name || t.url;
+    const startedAt = Date.now();
     const p = await probe(t.url, t.timeoutMs);
+    const tookMs = Date.now() - startedAt;
     const raw: "up" | "down" = p.ok ? "up" : "down";
 
     // Extend the run of identical raw outcomes; a flip resets it to 1.
     const streakCount = prev.streakStatus === raw ? (prev.streakCount ?? 0) + 1 : 1;
 
     let status = prev.status;
+    let fired: "alert" | "recovery" | null = null;
     if (prev.status === "unknown") {
       // First observation after (re)config: record baseline, never page.
       status = raw;
@@ -75,15 +79,26 @@ export async function evaluateHttpChecks(): Promise<void> {
       const need = raw === "down" ? Math.max(1, Math.round(t.failThreshold ?? HTTP_CHECK_FAIL_THRESHOLD)) : 1;
       if (streakCount >= need) {
         status = raw;
-        const label = t.name || t.url;
         if (raw === "down") {
           const detail = p.code ? `HTTP ${p.code} (non-2xx)` : `unreachable: ${p.error ?? "error"}`;
+          fired = "alert";
           await notify("alert", "HTTP check", label, detail).catch(() => {});
         } else {
+          fired = "recovery";
           await notify("recovery", "HTTP check", label, `back to HTTP ${p.code} OK`).catch(() => {});
         }
       }
     }
+
+    // One line per probe so operators can see flapping/threshold behavior in
+    // container logs (the only observable otherwise is the notify itself).
+    const need = raw === "down" ? Math.max(1, Math.round(t.failThreshold ?? HTTP_CHECK_FAIL_THRESHOLD)) : 1;
+    const outcome = p.code ? `HTTP ${p.code}` : (p.error ?? "error");
+    console.log(
+      `[http-check] ${label} raw=${raw} (${outcome}) ${tookMs}ms ` +
+      `streak=${streakCount}/${need} confirmed=${status}` +
+      (fired ? ` -> NOTIFY ${fired}` : (raw !== prev.status && prev.status !== "unknown" ? " (held, below threshold)" : "")),
+    );
 
     state[t.url] = { status, lastCheckAt: now, lastCode: p.code, lastError: p.error, streakStatus: raw, streakCount };
     dirty = true;
