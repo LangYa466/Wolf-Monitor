@@ -30,7 +30,9 @@ export async function POST(req: NextRequest) {
     if (u.protocol !== "http:" && u.protocol !== "https:") return NextResponse.json({ error: `only http(s): ${u.protocol}` }, { status: 400 });
     const iv = Math.max(30, Math.min(86_400, Math.round(Number(t?.intervalSec) || 300)));
     const name = typeof t?.name === "string" && t.name.trim() && t.name.length <= 80 ? t.name.trim() : undefined;
-    targets.push({ url: u.toString(), intervalSec: iv, name });
+    const failThreshold = Math.max(1, Math.min(10, Math.round(Number(t?.failThreshold) || 2)));
+    const timeoutMs = Math.max(1_000, Math.min(60_000, Math.round(Number(t?.timeoutMs) || 8_000)));
+    targets.push({ url: u.toString(), intervalSec: iv, name, failThreshold, timeoutMs });
   }
   // Preserve state for surviving URLs; drop entries for removed ones so a
   // re-added URL starts fresh instead of inheriting ancient status.

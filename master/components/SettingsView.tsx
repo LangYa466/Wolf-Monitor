@@ -1368,14 +1368,14 @@ function defaultOffline(nodeId: string): OfflineSetting {
 }
 
 // ── HTTP checks (admin-only, not exposed on public dashboard) ───────────────
-interface HttpCheckTarget { url: string; intervalSec: number; name?: string }
+interface HttpCheckTarget { url: string; intervalSec: number; name?: string; failThreshold?: number; timeoutMs?: number }
 interface HttpCheckState { status: "up" | "down" | "unknown"; lastCheckAt: number; lastCode?: number; lastError?: string }
 
 function HttpChecks() {
   const { t } = useI18n();
   const [targets, setTargets] = useState<HttpCheckTarget[]>([]);
   const [state, setState] = useState<Record<string, HttpCheckState>>({});
-  const [form, setForm] = useState({ url: "", intervalSec: 300, name: "" });
+  const [form, setForm] = useState({ url: "", intervalSec: 300, name: "", failThreshold: 2, timeoutMs: 8000 });
   const [msg, setMsg] = useState("");
   const [testing, setTesting] = useState<string | null>(null);
 
@@ -1395,10 +1395,12 @@ function HttpChecks() {
   async function addOrUpdate() {
     try { new URL(form.url); } catch { setMsg(t("msgFailed")); return; }
     const iv = Math.max(30, Math.min(86400, Math.round(form.intervalSec) || 300));
-    const clean: HttpCheckTarget = { url: form.url.trim(), intervalSec: iv };
+    const ft = Math.max(1, Math.min(10, Math.round(form.failThreshold) || 2));
+    const to = Math.max(1000, Math.min(60000, Math.round(form.timeoutMs) || 8000));
+    const clean: HttpCheckTarget = { url: form.url.trim(), intervalSec: iv, failThreshold: ft, timeoutMs: to };
     if (form.name.trim()) clean.name = form.name.trim();
     const next = targets.filter((x) => x.url !== clean.url).concat(clean);
-    setForm({ url: "", intervalSec: 300, name: "" });
+    setForm({ url: "", intervalSec: 300, name: "", failThreshold: 2, timeoutMs: 8000 });
     await save(next);
   }
   async function remove(url: string) {
@@ -1428,7 +1430,7 @@ function HttpChecks() {
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>URL</TableHead><TableHead>Name</TableHead><TableHead>Interval</TableHead><TableHead>Status</TableHead><TableHead />
+              <TableHead>URL</TableHead><TableHead>Name</TableHead><TableHead>Interval</TableHead><TableHead>Fails</TableHead><TableHead>Timeout</TableHead><TableHead>Status</TableHead><TableHead />
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -1437,6 +1439,8 @@ function HttpChecks() {
                 <TableCell className="font-mono text-xs break-all">{tt.url}</TableCell>
                 <TableCell>{tt.name || "—"}</TableCell>
                 <TableCell className="tabular-nums">{tt.intervalSec}s</TableCell>
+                <TableCell className="tabular-nums">{tt.failThreshold ?? 2}</TableCell>
+                <TableCell className="tabular-nums">{((tt.timeoutMs ?? 8000) / 1000)}s</TableCell>
                 <TableCell>{statusBadge(state[tt.url])}</TableCell>
                 <TableCell>
                   <div className="flex justify-end gap-0.5">
@@ -1451,7 +1455,7 @@ function HttpChecks() {
               </TableRow>
             ))}
             {targets.length === 0 && (
-              <TableRow><TableCell colSpan={5} className="text-muted-foreground">—</TableCell></TableRow>
+              <TableRow><TableCell colSpan={7} className="text-muted-foreground">—</TableCell></TableRow>
             )}
           </TableBody>
         </Table>
@@ -1468,6 +1472,14 @@ function HttpChecks() {
           <div className="w-28">
             <Label className="text-xs text-muted-foreground">Interval (s)</Label>
             <Input type="number" min={30} max={86400} value={form.intervalSec} onChange={(e) => setForm({ ...form, intervalSec: Number(e.target.value) || 300 })} />
+          </div>
+          <div className="w-24">
+            <Label className="text-xs text-muted-foreground">Fails</Label>
+            <Input type="number" min={1} max={10} value={form.failThreshold} onChange={(e) => setForm({ ...form, failThreshold: Number(e.target.value) || 2 })} />
+          </div>
+          <div className="w-28">
+            <Label className="text-xs text-muted-foreground">Timeout (ms)</Label>
+            <Input type="number" min={1000} max={60000} step={500} value={form.timeoutMs} onChange={(e) => setForm({ ...form, timeoutMs: Number(e.target.value) || 8000 })} />
           </div>
           <Button onClick={addOrUpdate}>{t("add")}</Button>
         </div>
