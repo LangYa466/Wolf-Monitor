@@ -1,3 +1,8 @@
 allowBuilds:
   esbuild: false
   sharp: false
+overrides:
+  nanoid: ^3.3.18
+  postcss: ^8.5.26
+minimumReleaseAgeExclude:
+  - lucide-react@1.33.0
