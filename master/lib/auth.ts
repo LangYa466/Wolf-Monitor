@@ -427,8 +427,9 @@ export async function ensureTokenForNode(hostname: string): Promise<string> {
   }
   const token = randomBytes(18).toString("base64url");
   await pool.query(
-    `INSERT INTO node_tokens (token, token_enc, token_hash, node_id, created_at)
-       VALUES (NULL, $1::jsonb, $2, $3, $4)`,
+    `INSERT INTO node_tokens
+       (token, token_enc, token_hash, node_id, claimed_node_id, created_at)
+       VALUES (NULL, $1::jsonb, $2, $3, $3, $4)`,
     [JSON.stringify(encNodeToken(token)), hashNodeToken(token), hostname, Date.now()],
   );
   return token;
