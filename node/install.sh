@@ -16,9 +16,9 @@ PROXY=""
 TRANSPORT="ws"
 INTERVAL="3"
 VERSION="latest"
-INSTALL_DIR="/opt/wolf"
+INSTALL_DIR="${WOLF_INSTALL_DIR:-/opt/wolf}"
 BIN="$INSTALL_DIR/wolf-node"
-SERVICE="wolf-node"
+SERVICE="${WOLF_SERVICE:-wolf-node}"
 
 err() { echo "[wolf] error: $*" >&2; exit 1; }
 info() { echo "[wolf] $*"; }
@@ -72,14 +72,6 @@ fi
 
 info "platform: ${OS}/${ARCH}"
 info "download:  ${URL}"
-
-# Stop any running instance first — a running executable is busy (ETXTBSY), so
-# overwriting it on re-install would fail with "Failure writing output".
-if [ "$OS" = "linux" ] && command -v systemctl >/dev/null 2>&1; then
-  systemctl stop "$SERVICE" 2>/dev/null || true
-elif [ "$OS" = "darwin" ]; then
-  launchctl unload "/Library/LaunchDaemons/io.wolf.node.plist" 2>/dev/null || true
-fi
 
 mkdir -p "$INSTALL_DIR"
 
@@ -138,6 +130,33 @@ else
 fi
 
 chmod +x "$TMP"
+
+# Keep the current probe online while downloading and verifying. Older
+# installers stopped it before the first network request, so a timeout left a
+# perfectly good binary installed but the service offline forever. Only stop
+# after the replacement is fully staged, and restore the old service if any
+# subsequent install step fails.
+SERVICE_WAS_ACTIVE="0"
+restore_service_on_error() {
+  rc=$?
+  if [ "$rc" -ne 0 ] && [ "$SERVICE_WAS_ACTIVE" = "1" ]; then
+    info "install failed after stopping ${SERVICE} — restoring previous service"
+    systemctl daemon-reload 2>/dev/null || true
+    systemctl start "$SERVICE" 2>/dev/null || true
+  fi
+  exit "$rc"
+}
+trap restore_service_on_error EXIT
+
+if [ "$OS" = "linux" ] && command -v systemctl >/dev/null 2>&1; then
+  if systemctl is-active --quiet "$SERVICE" 2>/dev/null; then
+    SERVICE_WAS_ACTIVE="1"
+  fi
+  systemctl stop "$SERVICE" 2>/dev/null || true
+elif [ "$OS" = "darwin" ]; then
+  launchctl unload "/Library/LaunchDaemons/io.wolf.node.plist" 2>/dev/null || true
+fi
+
 mv -f "$TMP" "$BIN"
 
 ARGS="-e ${ENDPOINT} -t ${TOKEN} -transport ${TRANSPORT} -interval ${INTERVAL}"
@@ -207,6 +226,7 @@ EOF
   # `enable` registers the unit for boot autostart; `restart` starts it now.
   systemctl enable "${SERVICE}" >/dev/null 2>&1 || true
   systemctl restart "${SERVICE}"
+  SERVICE_WAS_ACTIVE="0"
   info "installed '${SERVICE}' — started now AND enabled on boot [OK]"
   info "logs: journalctl -u ${SERVICE} -f"
 elif [ "$OS" = "darwin" ]; then
@@ -233,4 +253,5 @@ else
   info "  ${BIN} ${ARGS}"
 fi
 
+trap - EXIT
 info "done."
