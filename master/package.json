@@ -41,7 +41,7 @@
     "@types/validator": "^13.15.0",
     "@types/ws": "^8.5.13",
     "autoprefixer": "^10.6.1",
-    "postcss": "^8.5.26",
+    "postcss": "^8.5.28",
     "tailwindcss": "^4.3.3",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2"
