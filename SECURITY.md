@@ -30,7 +30,7 @@ In scope:
 
 - `master/` — Next.js dashboard, API routes, WebSocket ingestion (`server.ts`).
 - `node/` — Go agent (`wolf-node`).
-- Default install scripts (`install.sh`, `install.ps1`).
+- Default install scripts (`node/install.sh`, `node/install.ps1`).
 
 Out of scope:
 
@@ -38,9 +38,3 @@ Out of scope:
   `DATABASE_URL`, weak admin password, disabled TLS).
 - Findings against forks or third-party deployments that have diverged from
   this repository.
-
-## Operations & Key Rotation
-
-See [`master/README.md`](master/README.md#operations--key-rotation) for the
-runbook covering token rotation, credential rotation, database backup &
-restore, session invalidation, and binary integrity verification.
