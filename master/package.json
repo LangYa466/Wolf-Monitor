@@ -20,16 +20,16 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "ipaddr.js": "2.5.0",
-    "lru-cache": "11.5.2",
+    "lru-cache": "11.5.3",
     "lucide-react": "^1.33.0",
-    "next": "16.3.1",
+    "next": "16.3.6",
     "pg": "8.23.0",
     "react": "19.2.8",
     "react-dom": "19.2.8",
     "request-ip": "3.3.0",
     "tailwind-merge": "^3.6.0",
     "validator": "13.15.35",
-    "ws": "8.21.3"
+    "ws": "8.22.0"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.3.3",
