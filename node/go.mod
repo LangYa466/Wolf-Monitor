@@ -5,7 +5,7 @@ go 1.26.6
 require (
 	github.com/gorilla/websocket v1.5.3
 	github.com/prometheus-community/pro-bing v0.9.1
-	github.com/shirou/gopsutil/v4 v4.26.7
+	github.com/shirou/gopsutil/v4 v4.26.8
 )
 
 require (
