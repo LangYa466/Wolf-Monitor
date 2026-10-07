@@ -39,7 +39,7 @@
     "@types/react-dom": "^19.2.7",
     "@types/request-ip": "^0.0.41",
     "@types/validator": "^13.15.0",
-    "@types/ws": "^8.5.13",
+    "@types/ws": "^8.18.2",
     "autoprefixer": "^10.6.1",
     "postcss": "^8.5.28",
     "tailwindcss": "^4.3.3",
