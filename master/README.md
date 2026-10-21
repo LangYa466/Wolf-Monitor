@@ -65,13 +65,13 @@ created automatically on first request (`CREATE TABLE IF NOT EXISTS`):
 
 ```sh
 cp .env.example .env        # set DATABASE_URL only
-pnpm install
+bun install
 
 # (a) plain Next.js — nodes must use transport: http
-pnpm dev                 # http://localhost:3000
+bun dev                 # http://localhost:3000
 
 # (b) custom server with the node WebSocket endpoint
-pnpm dev:ws              # http://localhost:8080  + ws /api/ws/node
+bun dev:ws              # http://localhost:8080  + ws /api/ws/node
 ```
 
 Open the app, complete `/setup` to create the admin account, then copy the
@@ -81,15 +81,15 @@ Open the app, complete `/setup` to create the admin account, then copy the
 # websocket (needs dev:ws / start:ws)
 ../node/wolf-node -e ws://localhost:8080 -t "<NODE_TOKEN>"
 
-# http (works against pnpm dev too)
+# http (works against bun dev too)
 ../node/wolf-node -e http://localhost:3000 -t "<NODE_TOKEN>" -transport http
 ```
 
 ## Self-host (with node WebSocket)
 
 ```sh
-pnpm build
-DATABASE_URL=postgres://... PORT=8080 pnpm start:ws
+bun build
+DATABASE_URL=postgres://... PORT=8080 bun start:ws
 ```
 
 `server.ts` serves both the dashboard and the `/api/ws/node` websocket on the

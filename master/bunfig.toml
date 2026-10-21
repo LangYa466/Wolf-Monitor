@@ -1,0 +1,4 @@
+[install]
+# Equivalent of pnpm's save-exact default: `bun add` pins exact versions.
+# CI installs pass --frozen-lockfile explicitly.
+exact = true

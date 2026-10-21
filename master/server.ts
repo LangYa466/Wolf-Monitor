@@ -1,5 +1,5 @@
 // Custom Next.js server that adds a WebSocket endpoint for nodes running with
-// `transport: ws`. Use this when self-hosting (`pnpm dev:ws` / `start:ws`).
+// `transport: ws`. Use this when self-hosting (`bun dev:ws` / `start:ws`).
 //
 // Deployments that can't proxy WebSockets (serverless platforms, certain
 // reverse proxies) should run nodes with `transport: http` -> /api/report

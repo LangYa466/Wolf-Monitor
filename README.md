@@ -41,7 +41,7 @@ Two parts:
 
 ## Deploy
 
-- **Master**: self-host with `pnpm start:ws` — one process serves the dashboard
+- **Master**: self-host with `bun start:ws` — one process serves the dashboard
   and the node WebSocket on a single port. Put it behind Cloudflare / any reverse
   proxy if you need TLS, geo-routing, or DDoS protection.
 - **Node**: cross-compile for Linux/Windows (`GOOS=... go build`) and run as a

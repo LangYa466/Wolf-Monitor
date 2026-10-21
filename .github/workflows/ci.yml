@@ -31,7 +31,8 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
         with:
-          go-version: "1.26.6"
+          go-version: stable
+          check-latest: true
           cache-dependency-path: node/go.sum
       - name: vet + build
         working-directory: node
@@ -45,24 +46,19 @@ jobs:
           "$(go env GOPATH)/bin/govulncheck" ./...
 
   master:
-    name: master · next build
+    name: master · bun build
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: pnpm/action-setup@v6
+      - uses: oven-sh/setup-bun@v2
         with:
-          version: 11.22.0
-      - uses: actions/setup-node@v7
-        with:
-          node-version: "22"
-          cache: pnpm
-          cache-dependency-path: master/pnpm-lock.yaml
+          bun-version: 1.4.3
       - name: install
         working-directory: master
-        run: pnpm install --frozen-lockfile
+        run: bun install --frozen-lockfile
       - name: audit
         working-directory: master
-        run: pnpm audit --audit-level=high --prod
+        run: bun audit --audit-level=high
       - name: build
         working-directory: master
-        run: pnpm build
+        run: bun run build
