@@ -99,7 +99,7 @@ this host from the master's **Settings** page.
 ## Transport choice
 
 - **ws** — the node holds a persistent websocket to `/api/ws/node`. Use this
-  with a self-hosted master (`pnpm start:ws`). Lowest latency, auto-reconnect.
+  with a self-hosted master (`bun start:ws`). Lowest latency, auto-reconnect.
 - **http** — the node POSTs each sample to `/api/report`. Use this when the
   master is behind a proxy / CDN tier that can't carry a persistent WebSocket.
 
