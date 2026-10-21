@@ -23,7 +23,7 @@
     "lucide-react": "^1.59.0",
     "next": "16.3.8",
     "pg": "8.23.1",
-    "react": "19.3.0",
+    "react": "19.3.1",
     "react-dom": "19.3.0",
     "request-ip": "3.3.0",
     "tailwind-merge": "^3.7.0",
