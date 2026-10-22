@@ -220,6 +220,15 @@ ALTER TABLE alert_rules ADD COLUMN IF NOT EXISTS exclude BOOLEAN NOT NULL DEFAUL
 -- Per-node history-write throttle. Added after initial release; defaults to 0.
 ALTER TABLE nodes ADD COLUMN IF NOT EXISTS last_history_ts BIGINT NOT NULL DEFAULT 0;
 
+-- Lifetime traffic across node reboots. Nodes report kernel interface counters
+-- that restart from 0 on every boot. net_*_last holds the previous RAW counter
+-- and net_*_off the bytes accumulated before the latest reset(s); the stored
+-- metrics.netSent/netRecv are off + raw, so totals survive reboots.
+ALTER TABLE nodes ADD COLUMN IF NOT EXISTS net_sent_off  BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE nodes ADD COLUMN IF NOT EXISTS net_recv_off  BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE nodes ADD COLUMN IF NOT EXISTS net_sent_last BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE nodes ADD COLUMN IF NOT EXISTS net_recv_last BIGINT NOT NULL DEFAULT 0;
+
 -- Per-node admission tokens. Each node has its own token (the "key" the install
 -- script embeds). An unbound token (node_id IS NULL) is reserved for a future
 -- node and binds to the hostname on its first /api/report. Once bound, only
@@ -509,6 +518,12 @@ function sanitizeHost(h: HostInfo): HostInfo {
   };
 }
 
+// Clamp a reported cumulative counter into a safe non-negative integer so it
+// always fits the BIGINT bookkeeping columns.
+function counter(v: number): number {
+  return Number.isFinite(v) && v > 0 ? Math.min(Math.trunc(v), Number.MAX_SAFE_INTEGER) : 0;
+}
+
 function sanitizeMetrics(m: Metrics): Metrics {
   const n = (v: unknown) => (Number.isFinite(Number(v)) ? Number(v) : 0);
   return {
@@ -576,19 +591,36 @@ export async function saveReport(
     seq: string;
     name: string | null;
   }>(
-    `INSERT INTO nodes (id, host, metrics, last_seen, updated_at, ip, country, sort_order)
+    `INSERT INTO nodes (id, host, metrics, last_seen, updated_at, ip, country, sort_order,
+                        net_sent_last, net_recv_last)
      VALUES ($1, $2, $3, $4, now(), $5, $6,
-             COALESCE((SELECT MAX(sort_order) + 1 FROM nodes), 0))
+             COALESCE((SELECT MAX(sort_order) + 1 FROM nodes), 0), $7::bigint, $8::bigint)
      ON CONFLICT (id) DO UPDATE
        SET host = EXCLUDED.host,
-           metrics = EXCLUDED.metrics,
+           -- A raw counter lower than the previous one means the node rebooted
+           -- (counters restart at 0): bank the previous value into the offset.
+           net_sent_off = nodes.net_sent_off
+             + CASE WHEN $7::bigint < nodes.net_sent_last THEN nodes.net_sent_last ELSE 0 END,
+           net_recv_off = nodes.net_recv_off
+             + CASE WHEN $8::bigint < nodes.net_recv_last THEN nodes.net_recv_last ELSE 0 END,
+           net_sent_last = $7::bigint,
+           net_recv_last = $8::bigint,
+           metrics = jsonb_set(
+             jsonb_set(EXCLUDED.metrics, '{netSent}',
+               to_jsonb(nodes.net_sent_off
+                 + CASE WHEN $7::bigint < nodes.net_sent_last THEN nodes.net_sent_last ELSE 0 END
+                 + $7::bigint)),
+             '{netRecv}',
+             to_jsonb(nodes.net_recv_off
+               + CASE WHEN $8::bigint < nodes.net_recv_last THEN nodes.net_recv_last ELSE 0 END
+               + $8::bigint)),
            last_seen = EXCLUDED.last_seen,
            updated_at = now(),
            ip = COALESCE($5, nodes.ip),
            country = CASE WHEN nodes.country_manual THEN nodes.country
                           ELSE COALESCE($6, nodes.country) END
      RETURNING sort_order, country, ip, seq, name`,
-    [id, hostJson, metricsJson, now, ip, country]
+    [id, hostJson, metricsJson, now, ip, country, counter(safeMetrics.netSent), counter(safeMetrics.netRecv)]
   );
 
   // Throttle metrics_history writes per node: at most 1 row / HISTORY_MIN_INTERVAL_MS.
