@@ -1,4 +1,5 @@
 import type { NextConfig } from "next";
+import pkg from "./package.json" with { type: "json" };
 
 // Defense-in-depth response headers. CSP allowlists the exact third-party
 // origins used in app/layout.tsx (font-logos + Google Fonts). 'unsafe-inline'
@@ -34,6 +35,9 @@ const securityHeaders = [
 
 const nextConfig: NextConfig = {
   reactStrictMode: true,
+  // Exposes only the release version (not the whole package.json) to client
+  // code; the install snippets pin their script ref to this tag.
+  env: { NEXT_PUBLIC_APP_VERSION: pkg.version },
   // `pg` and `ws` are server-only native-ish deps; keep them external so Next
   // doesn't try to bundle them into serverless/edge function output.
   serverExternalPackages: ["pg", "ws"],

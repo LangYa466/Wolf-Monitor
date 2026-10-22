@@ -49,8 +49,9 @@ import { GripVertical, Trash2, RotateCw, Check, Minus, AlertTriangle, Terminal, 
 //
 // Pinned to a release tag (not `main`) so a malicious push to main can't
 // rewrite the install script every existing operator pastes onto new boxes.
-// Bump on release. CWE-494.
-const INSTALL_REF = "v1.6.0";
+// Follows master/package.json (bumped together with the node release, which
+// creates the matching vX.Y.Z tag). CWE-494.
+const INSTALL_REF = `v${process.env.NEXT_PUBLIC_APP_VERSION}`;
 // Strict https://host[:port] proxy regex. Anything else (http://, paths,
 // query strings, embedded creds, IDN tricks) is rejected before we splice
 // it into a `wget | sudo bash` snippet.
@@ -467,9 +468,12 @@ function ServersSection({
     const res = await api("/api/settings", "POST", { ghProxyUrl: v });
     setMsg(res.ok ? t("msgSaved") : t("msgFailed"));
   }
-  async function rotateNodeToken(hostname: string) {
+  // The API field is still called `hostname`, but it carries the node id (the
+  // key nodes/tokens are stored under), which differs from the real hostname
+  // for nodes registered as node_xxxx.
+  async function rotateNodeToken(id: string) {
     const res = await api("/api/settings", "POST", {
-      rotateNodeToken: { hostname },
+      rotateNodeToken: { hostname: id },
     });
     if (res.ok) {
       const d = await res.json();
@@ -777,7 +781,7 @@ function ServersSection({
                     <div className="mt-1.5 space-y-1.5">
                       <InstallSnippet
                         base={base}
-                        tok={nodeTokens[n.host.hostname] ?? "TOKEN"}
+                        tok={nodeTokens[n.id] ?? "TOKEN"}
                         hostname={n.host.hostname}
                         proxy={picked.proxy}
                         autoCnProxy={picked.autoCn}
@@ -788,7 +792,7 @@ function ServersSection({
                           variant="ghost"
                           size="sm"
                           className="[&_svg]:size-3.5"
-                          onClick={() => rotateNodeToken(n.host.hostname)}
+                          onClick={() => rotateNodeToken(n.id)}
                         >
                           <RotateCw /> {t("rotate")}
                         </Button>
