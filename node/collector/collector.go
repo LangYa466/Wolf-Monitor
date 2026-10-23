@@ -132,10 +132,9 @@ func (c *Collector) Collect(ctx context.Context) Metrics {
 		c.lastDiskWrite = write
 	}
 
-	// Network — aggregate over all interfaces (pernic=false).
-	if io, err := net.IOCounters(false); err == nil && len(io) > 0 {
-		sent := io[0].BytesSent
-		recv := io[0].BytesRecv
+	// Network — physical NICs only (see pickNICs); summing every interface
+	// multiply-counts container/bridge/tunnel traffic.
+	if sent, recv, ok := netTotals(); ok {
 		m.NetSent = sent
 		m.NetRecv = recv
 		if elapsed > 0 {

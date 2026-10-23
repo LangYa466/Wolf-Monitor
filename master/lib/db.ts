@@ -222,7 +222,8 @@ ALTER TABLE nodes ADD COLUMN IF NOT EXISTS last_history_ts BIGINT NOT NULL DEFAU
 
 -- Lifetime traffic across node reboots. Nodes report kernel interface counters
 -- that restart from 0 on every boot. net_*_last holds the previous RAW counter
--- and net_*_off the bytes accumulated before the latest reset(s); the stored
+-- and net_*_off the bytes accumulated before the latest REBOOT(s) (detected via
+-- host.bootTime, not counter dips); the stored
 -- metrics.netSent/netRecv are off + raw, so totals survive reboots.
 ALTER TABLE nodes ADD COLUMN IF NOT EXISTS net_sent_off  BIGINT NOT NULL DEFAULT 0;
 ALTER TABLE nodes ADD COLUMN IF NOT EXISTS net_recv_off  BIGINT NOT NULL DEFAULT 0;
@@ -584,6 +585,16 @@ export async function saveReport(
   const ip = opts.ip ?? null;
   const country = opts.country ?? null;
 
+  // A reboot is when the node's boot time moved forward (the 30s slack absorbs
+  // clock steps / rounding). NEVER infer it from the counter going down: the
+  // counter is a sum over interfaces, and any veth/bridge/tun appearing or
+  // disappearing (docker run --rm, container rebuilds) shrinks it without a
+  // reboot. v1.7.8 treated each such dip as a reboot and re-added the whole
+  // lifetime total, inflating one node ~11x. An unreported (0) previous boot
+  // time never counts as a reboot.
+  const REBOOTED = `(COALESCE((nodes.host->>'bootTime')::bigint, 0) > 0
+     AND COALESCE((EXCLUDED.host->>'bootTime')::bigint, 0)
+         > COALESCE((nodes.host->>'bootTime')::bigint, 0) + 30)`;
   const { rows } = await pool.query<{
     sort_order: number;
     country: string | null;
@@ -597,22 +608,22 @@ export async function saveReport(
              COALESCE((SELECT MAX(sort_order) + 1 FROM nodes), 0), $7::bigint, $8::bigint)
      ON CONFLICT (id) DO UPDATE
        SET host = EXCLUDED.host,
-           -- A raw counter lower than the previous one means the node rebooted
-           -- (counters restart at 0): bank the previous value into the offset.
+           -- On reboot the kernel counters restart at 0: bank the previous raw
+           -- value into the offset so lifetime totals survive.
            net_sent_off = nodes.net_sent_off
-             + CASE WHEN $7::bigint < nodes.net_sent_last THEN nodes.net_sent_last ELSE 0 END,
+             + CASE WHEN ${REBOOTED} THEN nodes.net_sent_last ELSE 0 END,
            net_recv_off = nodes.net_recv_off
-             + CASE WHEN $8::bigint < nodes.net_recv_last THEN nodes.net_recv_last ELSE 0 END,
+             + CASE WHEN ${REBOOTED} THEN nodes.net_recv_last ELSE 0 END,
            net_sent_last = $7::bigint,
            net_recv_last = $8::bigint,
            metrics = jsonb_set(
              jsonb_set(EXCLUDED.metrics, '{netSent}',
                to_jsonb(nodes.net_sent_off
-                 + CASE WHEN $7::bigint < nodes.net_sent_last THEN nodes.net_sent_last ELSE 0 END
+                 + CASE WHEN ${REBOOTED} THEN nodes.net_sent_last ELSE 0 END
                  + $7::bigint)),
              '{netRecv}',
              to_jsonb(nodes.net_recv_off
-               + CASE WHEN $8::bigint < nodes.net_recv_last THEN nodes.net_recv_last ELSE 0 END
+               + CASE WHEN ${REBOOTED} THEN nodes.net_recv_last ELSE 0 END
                + $8::bigint)),
            last_seen = EXCLUDED.last_seen,
            updated_at = now(),
