@@ -127,16 +127,18 @@ const SESSION_REFRESH_MS = 60 * 60 * 1000;
 // Legacy format (pre-1.5.6, accepted on verify only):
 //   scrypt$<salt-hex>$<hash-hex>   ← Node defaults (N=2^14, r=8, p=1)
 //
-// 2026 OWASP baseline for scrypt is N=2^17, r=8, p=1. maxmem is bumped to
-// ~128 MiB so Node doesn't refuse the larger N (default maxmem is 32 MiB,
-// which caps useful N around 2^15). Old hashes keep verifying with the
+// 2026 OWASP baseline for scrypt is N=2^17, r=8, p=1. That needs 128*N*r =
+// 128 MiB plus a little overhead, and OpenSSL rejects maxmem == 128 MiB with
+// ERR_CRYPTO_INVALID_SCRYPT_PARAMS (RangeError), which made every setup and
+// every login that rehashes fail. 256 MiB leaves headroom (default maxmem is
+// 32 MiB, which caps useful N around 2^15). Old hashes keep verifying with the
 // legacy params; they'll be silently upgraded the next time the user logs
 // in (see verifyUserPassword → password rewrite hook in the route).
 const SCRYPT_N = 1 << 17;
 const SCRYPT_R = 8;
 const SCRYPT_P = 1;
 const SCRYPT_KEYLEN = 64;
-const SCRYPT_MAXMEM = 128 * 1024 * 1024;
+const SCRYPT_MAXMEM = 256 * 1024 * 1024;
 const SCRYPT_OPTS = { N: SCRYPT_N, r: SCRYPT_R, p: SCRYPT_P, maxmem: SCRYPT_MAXMEM } as const;
 
 export async function hashPassword(password: string): Promise<string> {

@@ -421,6 +421,11 @@ export async function latencyHistoryForNode(
 
 // Latest latency per (task, node) for the dashboard / /latency view.
 //
+// One index probe per (task, node) pair via LATERAL on
+// ping_results_task_node_ts. The previous DISTINCT ON form sorted every row of
+// ping_results (2.3M rows / ~3.7s with a disk spill on the live DB) on each
+// poll, pinning the single pg connection and starving report ingestion.
+//
 // Filtered to (task, node) pairs that match the task's CURRENT assignment
 // (enabled + allowlist/blacklist), so rows recorded before a task's targets
 // changed don't keep showing up. Also joins `nodes` to drop results for
@@ -429,18 +434,23 @@ export async function latencyHistoryForNode(
 export async function latestPingResults(): Promise<PingResult[]> {
   await ensureSchema();
   const { rows } = await getPool().query(
-    `SELECT DISTINCT ON (pr.task_id, pr.node_id)
-        pr.task_id, pr.node_id, pr.ts, pr.latency_ms, pr.success
-       FROM ping_results pr
-       JOIN ping_tasks pt ON pt.id = pr.task_id
-       JOIN nodes n ON n.id = pr.node_id
+    `SELECT l.task_id, l.node_id, l.ts, l.latency_ms, l.success
+       FROM ping_tasks pt
+       CROSS JOIN nodes n
+       CROSS JOIN LATERAL (
+         SELECT pr.task_id, pr.node_id, pr.ts, pr.latency_ms, pr.success
+           FROM ping_results pr
+          WHERE pr.task_id = pt.id AND pr.node_id = n.id
+          ORDER BY pr.ts DESC
+          LIMIT 1
+       ) l
       WHERE pt.enabled = TRUE
         AND (
-          (pt.exclude = FALSE AND (pt.node_ids = '[]'::jsonb OR pt.node_ids ? pr.node_id))
+          (pt.exclude = FALSE AND (pt.node_ids = '[]'::jsonb OR pt.node_ids ? n.id))
           OR
-          (pt.exclude = TRUE AND NOT (pt.node_ids ? pr.node_id))
+          (pt.exclude = TRUE AND NOT (pt.node_ids ? n.id))
         )
-      ORDER BY pr.task_id, pr.node_id, pr.ts DESC`
+      ORDER BY l.task_id, l.node_id`
   );
   return rows.map((r) => ({
     taskId: r.task_id,
