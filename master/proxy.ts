@@ -4,6 +4,14 @@ import { NextRequest, NextResponse } from "next/server";
 // (POST/PATCH/PUT/DELETE) must originate same-origin. Node-facing and auth
 // bootstrap routes are exempt — they're invoked by the Go agent or pre-login
 // browser, not the authenticated admin session.
+//
+// The matcher is deliberately narrow (see the export at the bottom): only the
+// routes this file actually guards. Node ingestion (/api/report, /api/ping,
+// /api/tasks, /api/cron) is the highest-frequency traffic the master sees and
+// is exempt below anyway, so running the edge middleware sandbox for it bought
+// nothing. It is also the traffic that correlates with the master's slow heap
+// growth (a per-invocation array of edge-sandbox module functions), so keeping
+// those requests out of the sandbox is both free and the mitigation.
 
 const NODE_PATHS = ["/api/report", "/api/ping", "/api/tasks", "/api/cron"];
 const AUTH_OPEN = ["/api/auth/login", "/api/auth/setup"];
@@ -52,4 +60,19 @@ export function proxy(req: NextRequest) {
   return NextResponse.next();
 }
 
-export const config = { matcher: "/api/:path*" };
+// Every route below is either a mutating admin endpoint (CSRF guard) or
+// /api/nodes* (cross-site read guard). Anything not listed never needs
+// middleware; adding a new mutating admin route means adding it here.
+export const config = {
+  matcher: [
+    "/api/nodes/:path*",
+    "/api/alerts/:path*",
+    "/api/offline",
+    "/api/ping-tasks/:path*",
+    "/api/settings",
+    "/api/notify-config",
+    "/api/notify-test",
+    "/api/http-checks/:path*",
+    "/api/auth/logout",
+  ],
+};
