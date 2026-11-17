@@ -57,9 +57,8 @@ export default function Dashboard({
   const [region, setRegion] = useState<Region>("all");
   const [status, setStatus] = useState<StatusFilter>("all");
   // Start at 0 (renders "—") so SSR and first client render agree on the
-  // clock display. datetime() uses local timezone (getHours/etc) so any non-
-  // zero seed would diverge between UTC server and the user's browser TZ,
-  // tripping React #418 hydration mismatch.
+  // clock display. A non-zero seed would differ between server render and
+  // hydration, tripping React #418 hydration mismatch.
   const [now, setNow] = useState<number>(0);
 
   // Live updates + 1s clock tick.

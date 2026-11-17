@@ -11,6 +11,7 @@
 
 import { lookup } from "dns/promises";
 import { getSetting } from "./db";
+import { datetime, TZ_LABEL } from "./format";
 import { isIpLiteral, isPublicIp } from "./ipcheck";
 import type { NotifyConfig } from "./types";
 
@@ -108,7 +109,7 @@ export function renderTemplate(
 }
 
 function nowString(): string {
-  return new Date().toISOString().replace("T", " ").slice(0, 19) + " UTC";
+  return `${datetime(Date.now())} ${TZ_LABEL}`;
 }
 
 async function sendTelegram(cfg: NotifyConfig, text: string): Promise<void> {

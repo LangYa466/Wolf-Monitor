@@ -84,15 +84,20 @@ export function uptimeCJK(seconds: number): string {
   return `${m}分`;
 }
 
-// datetime formats a unix-millis timestamp as "YYYY-MM-DD HH:MM:SS" in local
-// time, matching the 啟動時間 / 最後上報時間 fields on the detail page.
+// Every time shown by the master is fixed to UTC+8, independent of the server
+// or browser timezone (so SSR and client hydration agree too).
+export const TZ_LABEL = "UTC+8";
+const TZ_OFFSET_MS = 8 * 3600 * 1000;
+
+// datetime formats a unix-millis timestamp as "YYYY-MM-DD HH:MM:SS" in UTC+8,
+// matching the 啟動時間 / 最後上報時間 fields on the detail page.
 export function datetime(ms: number): string {
   if (!ms || ms < 0) return "—";
-  const d = new Date(ms);
+  const d = new Date(ms + TZ_OFFSET_MS);
   const p = (n: number) => String(n).padStart(2, "0");
   return (
-    `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ` +
-    `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`
+    `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())} ` +
+    `${p(d.getUTCHours())}:${p(d.getUTCMinutes())}:${p(d.getUTCSeconds())}`
   );
 }
 

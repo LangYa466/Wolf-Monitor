@@ -351,9 +351,7 @@ export function BandwidthChart({
         const i = Math.round((k / (count - 1)) * (last - 1));
         const t = timestamps[i];
         if (t == null) continue;
-        const d = new Date(t);
-        const p = (x: number) => String(x).padStart(2, "0");
-        xTicks.push({ i, label: `${p(d.getHours())}:${p(d.getMinutes())}` });
+        xTicks.push({ i, label: datetime(t).slice(11, 16) }); // HH:MM
       }
     }
 

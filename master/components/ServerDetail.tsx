@@ -71,9 +71,9 @@ export default function ServerDetail({
   const [points, setPoints] = useState<HistoryPoint[]>([]);
   const [range, setRange] = useState<RangeKey>("realtime");
   const [tab, setTab] = useState<Tab>("detail");
-  // Start at 0 so SSR and first client render agree (datetime() formats in
-  // local TZ — any non-zero seed renders different HH:MM:SS on the UTC server
-  // vs the user's browser, tripping React #418 hydration mismatch).
+  // Start at 0 so SSR and first client render agree (a non-zero seed renders
+  // a different HH:MM:SS between server render and hydration, tripping React
+  // #418 hydration mismatch).
   const [now, setNow] = useState<number>(0);
   const [error, setError] = useState<string | null>(dbError);
   const [loadingHist, setLoadingHist] = useState(true);
